@@ -1,0 +1,22 @@
+[project]
+name = "api"
+version = "0.1.0"
+description = "Default template for PDM package"
+authors = [
+    {name = "AbdullarhyTech360", email = "abdullahimaikidandan@gmail.com"},
+]
+dependencies = ["fastapi>=0.116.1", "uvicorn>=0.35.0"]
+requires-python = "==3.13.*"
+readme = "README.md"
+license = {text = "MIT"}
+
+
+[tool.pdm]
+distribution = false
+
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "isort>=6.0.1",
+    "pytest>=8.4.1",
+]
