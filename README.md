@@ -29,6 +29,16 @@ Super-AI is a modern AI-powered web application designed to assist with everyday
 - **Enterprise-grade Security:** Built with security best practices.
 - **Developer-Friendly:** Modular codebase and clear docs for contributors.
 
+## Screenshots
+
+**Landing Page:**
+
+![Super-AI Landing Page](screenshot-1.jpeg)
+
+**Chat Page:**
+
+![Super-AI Chat Page](screenshot-2.jpeg)
+
 ## Tech Stack
 
 - **Frontend:** [Next.js](https://nextjs.org/) (React)
