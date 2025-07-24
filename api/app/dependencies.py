@@ -1,0 +1,1 @@
+# Shared dependencies (auth, DB sessions, etc.) 

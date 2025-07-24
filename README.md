@@ -1,6 +1,6 @@
 # Super-AI
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
+![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
 ## Overview
@@ -51,8 +51,25 @@ Super-AI is a modern AI-powered web application designed to assist with everyday
 ## Project Structure
 
 ```
-/web    # Next.js frontend (see web/README.md for setup)
-/api    # FastAPI backend (see api/README.md for setup)
+/api
+  /app
+    /routers      # API endpoint modules
+    /services     # Business logic
+    /models       # ORM models
+    /schemas      # Pydantic schemas
+    /db           # DB connection and migrations
+    dependencies.py # Shared dependencies (auth, DB sessions)
+    main.py       # FastAPI app entrypoint
+/web
+  /src
+    /app          # Next.js app router
+    /components   # Reusable UI components
+    /features     # Feature-driven modules (chat, auth, etc.)
+    /lib          # API client, utilities
+    /types        # Shared TypeScript types
+    /hooks        # Custom React hooks
+docker-compose.yml # Orchestrates backend and frontend
+README.md
 ```
 
 This is a monorepo: both frontend and backend are managed in a single git repository.
@@ -85,6 +102,15 @@ pdm install
 pdm run uvicorn app.main:app --reload
 ```
 
+### Using Docker Compose
+
+To start both frontend and backend together for development:
+```bash
+docker-compose up --build
+```
+- Frontend: http://localhost:3000
+- Backend: http://localhost:8000
+
 ## Usage
 
 1. Register or log in to your Super-AI account.
@@ -99,6 +125,21 @@ We welcome contributions from the community!
 - Read the [CONTRIBUTING.md](CONTRIBUTING.md) for our contributing guidelines.
 - Please follow our code of conduct (if available).
 - Check open issues or start a discussion to suggest features or report bugs.
+
+**Folder Conventions:**
+- **Backend:**
+  - Place new API endpoints in `api/app/routers/`
+  - Core logic in `api/app/services/`
+  - ORM models in `api/app/models/`
+  - Pydantic schemas in `api/app/schemas/`
+  - Database connection/migrations in `api/app/db/`
+  - Shared dependencies in `api/app/dependencies.py`
+- **Frontend:**
+  - Reusable UI components in `web/src/components/`
+  - Feature modules in `web/src/features/`
+  - Utilities and API clients in `web/src/lib/`
+  - Shared TypeScript types in `web/src/types/`
+  - Custom React hooks in `web/src/hooks/`
 
 ## Database Choice
 
