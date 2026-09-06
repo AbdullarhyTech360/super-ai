@@ -22,7 +22,9 @@ const Settings = () => {
     autoSave: true
   });
 
-  const handleSettingChange = (key: string, value: any) => {
+  type Settings = typeof settings;
+
+  const handleSettingChange = <Key extends keyof Settings>(key: Key, value: Settings[Key]) => {
     setSettings(prev => ({
       ...prev,
       [key]: value
