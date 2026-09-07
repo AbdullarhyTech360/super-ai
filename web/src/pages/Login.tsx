@@ -33,19 +33,38 @@ const Login = () => {
     },
   });
 
-const onSubmit = (data: LoginFormData) => {
-  console.log('Login attempt:', data);
-  const raw = localStorage.getItem('demoCredentials');
-  const saved = raw ? JSON.parse(raw) : null;
-  if (!saved || saved.email !== data.email || saved.password !== data.password) {
-    toast({ title: 'Invalid credentials', description: 'Please check your email and password', variant: 'destructive' });
-    return;
-  }
-  localStorage.setItem('demoCurrentUser', JSON.stringify({ name: saved.name, email: saved.email }));
-  toast({ title: 'Login Successful', description: 'Welcome back to Super AI!' });
-  login();
-  navigate('/chat');
-};
+const onSubmit = async (data: LoginFormData) => {
+    try {
+      const response = await fetch('http://localhost:8000/api/auth/login', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(data),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        toast({
+          title: 'Login Failed',
+          description: errorData.detail || 'Unable to login. Please try again later.',
+        });
+        return;
+      }
+
+      const result = await response.json();
+      localStorage.setItem('access_token', result.access_token);
+      toast({ title: 'Login Successful', description: 'Welcome back to Super AI!' });
+      login();
+      navigate('/chat');
+    } catch (error) {
+      console.error('Error during login:', error);
+      toast({
+        title: 'Login Failed',
+        description: 'An error occurred while logging in. Please try again.',
+      });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center px-4">

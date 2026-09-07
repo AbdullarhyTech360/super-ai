@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Plus, Search, Menu, X, Paperclip, Mic, MicOff, Bot, User } from 'lucide-react';
+import { Link, useNavigate } from 'react-router-dom';
+import { Send, Plus, Search, Menu, X, Paperclip, Mic, MicOff, Bot, User, Settings, CircleHelp, LogOut } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -18,6 +19,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Message {
   id: string;
@@ -46,7 +48,14 @@ const Chat = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { logout } = useAuth();
   const { toast } = useToast();
+
+  const handleLogout = () => {
+    logout();
+    navigate('/');
+  };
 
   useEffect(() => {
     const handleResize = () => {
@@ -305,6 +314,42 @@ const Chat = () => {
               <p className="text-xs text-muted-foreground">Always here to help</p>
             </div>
           </div>
+          <nav className="flex items-center gap-1" aria-label="Workspace navigation">
+            <Link to="/chat">
+              <Button variant="ghost" size="sm" className="text-primary" title="Chat">
+                <Bot className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Chat</span>
+              </Button>
+            </Link>
+            <Link to="/profile">
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" title="Profile">
+                <User className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Profile</span>
+              </Button>
+            </Link>
+            <Link to="/settings">
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" title="Settings">
+                <Settings className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Settings</span>
+              </Button>
+            </Link>
+            <Link to="/help">
+              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" title="Help">
+                <CircleHelp className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Help</span>
+              </Button>
+            </Link>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              className="text-muted-foreground hover:text-destructive"
+              title="Log out"
+            >
+              <LogOut className="w-4 h-4 sm:mr-2" />
+              <span className="hidden sm:inline">Logout</span>
+            </Button>
+          </nav>
         </div>
 
         {/* Messages Area */}

@@ -1,6 +1,6 @@
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { MessageCircle, Settings, LogOut, User } from 'lucide-react';
+import { Bot, CircleHelp, LogOut, MessageCircle, Settings, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '@/hooks/useAuth';
@@ -19,42 +19,53 @@ const Navbar = () => {
             <MessageCircle className="w-8 h-8 text-primary" />
             Super AI
           </Link>
-          {/* Authenticated Navigation */}
           {isAuthenticated && (
-            <div className="hidden md:flex items-center gap-6">
-              <Link 
-                to="/chat" 
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  isActive('/chat') ? 'text-primary' : 'text-muted-foreground'
-                }`}
-              >
-                Chat
+            <nav className="flex items-center gap-1" aria-label="Workspace navigation">
+              <Link to="/chat">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={isActive('/chat') ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+                  title="Chat"
+                >
+                  <Bot className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Chat</span>
+                </Button>
               </Link>
-              <Link 
-                to="/settings" 
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  isActive('/settings') ? 'text-primary' : 'text-muted-foreground'
-                }`}
-              >
-                Settings
+              <Link to="/profile">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={isActive('/profile') ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+                  title="Profile"
+                >
+                  <User className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Profile</span>
+                </Button>
               </Link>
-              <Link 
-                to="/profile" 
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  isActive('/profile') ? 'text-primary' : 'text-muted-foreground'
-                }`}
-              >
-                Profile
+              <Link to="/settings">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={isActive('/settings') ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+                  title="Settings"
+                >
+                  <Settings className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Settings</span>
+                </Button>
               </Link>
-              <Link 
-                to="/help" 
-                className={`text-sm font-medium transition-colors hover:text-primary ${
-                  isActive('/help') ? 'text-primary' : 'text-muted-foreground'
-                }`}
-              >
-                Help
+              <Link to="/help">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className={isActive('/help') ? 'text-primary' : 'text-muted-foreground hover:text-foreground'}
+                  title="Help"
+                >
+                  <CircleHelp className="w-4 h-4 sm:mr-2" />
+                  <span className="hidden sm:inline">Help</span>
+                </Button>
               </Link>
-            </div>
+            </nav>
           )}
 
           {/* Actions */}
@@ -65,9 +76,11 @@ const Navbar = () => {
                 variant="ghost"
                 size="sm"
                 onClick={() => { logout(); navigate('/'); }}
+                className="text-muted-foreground hover:text-destructive"
+                title="Log out"
               >
-                <LogOut className="w-4 h-4 mr-2" />
-                Logout
+                <LogOut className="w-4 h-4 sm:mr-2" />
+                <span className="hidden sm:inline">Logout</span>
               </Button>
             ) : (
               <>
