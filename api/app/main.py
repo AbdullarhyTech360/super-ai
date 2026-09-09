@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import jwt
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 from fastapi import Depends, FastAPI, HTTPException
@@ -14,7 +15,7 @@ from app.db.database import create_db_and_tables
 from app.models.user import User
 from app.models.forms import SignUp, Login
 from app.schemas.conversation_role import Chat_role
-from app.services.conversation_ai import send_message
+from app.services.conversation_ai import send_message_stream
 
 import os
 from dotenv import load_dotenv
@@ -146,8 +147,6 @@ def chat_with_ai(
     current_user: Annotated[User, Depends(get_current_user)],
     session: sessionDep,
 ):
-    response = send_message(chat_model.input)
-
     from app.models.chat import Conversation, Message
 
     if chat_model.is_new or chat_model.conversation_id is None:
@@ -164,15 +163,42 @@ def chat_with_ai(
         if conversation is None or conversation.user_id != current_user.id:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-    session.add_all([
-        Message(conversation_id=conversation.id, text=chat_model.input, sender="user"),
-        Message(conversation_id=conversation.id, text=response, sender="ai"),
-    ])
-    conversation.updated_at = datetime.now(timezone.utc)
-    session.add(conversation)
-    session.commit()
+    history = [
+        (message.sender, message.text)
+        for message in session.query(Message)
+        .filter(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at)
+        .all()
+    ]
+    conversation_id = conversation.id
 
-    return {"conversation_id": conversation.id, "output": response}
+    def stream_response():
+        import json
+
+        yield json.dumps({
+            "type": "start",
+            "conversation_id": conversation_id,
+        }) + "\n"
+
+        response_parts = []
+        for chunk in send_message_stream(chat_model.input, history):
+            response_parts.append(chunk)
+            yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
+
+        response = "".join(response_parts)
+        session.add_all([
+            Message(conversation_id=conversation_id, text=chat_model.input, sender="user"),
+            Message(conversation_id=conversation_id, text=response, sender="ai"),
+        ])
+        conversation.updated_at = datetime.now(timezone.utc)
+        session.add(conversation)
+        session.commit()
+        yield json.dumps({"type": "done"}) + "\n"
+
+    return StreamingResponse(
+        stream_response(),
+        media_type="application/x-ndjson",
+    )
 
 # A route for fetching conversations for the current user
 @app.get("/api/conversations")

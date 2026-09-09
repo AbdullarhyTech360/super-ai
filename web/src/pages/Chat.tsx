@@ -36,6 +36,7 @@ interface Conversation {
 }
 
 const Chat = () => {
+  const activeConversationStorageKey = 'active_conversation_id';
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
@@ -48,6 +49,13 @@ const Chat = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const isInitialActiveConversation = useRef(true);
+  const streamQueueRef = useRef<string[]>([]);
+  const streamDisplayTextRef = useRef('');
+  const streamConversationIdRef = useRef<string | null>(null);
+  const streamMessageIdRef = useRef<string | null>(null);
+  const streamDoneRef = useRef(false);
+  const streamRevealTimerRef = useRef<number | null>(null);
   const navigate = useNavigate();
   const { logout, authenticatedFetch } = useAuth();
   const { toast } = useToast();
@@ -76,6 +84,12 @@ const Chat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversations, isTyping]);
 
+  useEffect(() => () => {
+    if (streamRevealTimerRef.current) {
+      window.clearInterval(streamRevealTimerRef.current);
+    }
+  }, []);
+
   // Add a logic to load conversations from the backend when the component mounts
   useEffect(() => {
     const fetchConversations = async () => {
@@ -89,7 +103,7 @@ const Chat = () => {
         });
         if (!response.ok) throw new Error('Failed to fetch conversations');
         const data = await response.json();
-        setConversations((data.conversations ?? []).map((conversation: any) => ({
+        const loadedConversations = (data.conversations ?? []).map((conversation: any) => ({
           id: conversation.id,
           title: conversation.title,
           updatedAt: new Date(conversation.updated_at),
@@ -99,7 +113,15 @@ const Chat = () => {
             sender: message.sender,
             timestamp: new Date(message.created_at),
           })),
-        })));
+        }));
+        setConversations(loadedConversations);
+
+        const savedConversationId = localStorage.getItem(activeConversationStorageKey);
+        if (savedConversationId && loadedConversations.some(
+          conversation => conversation.id === savedConversationId
+        )) {
+          setActiveConversation(savedConversationId);
+        }
       } catch (error) {
         console.error('Error fetching conversations:', error);
       }
@@ -107,6 +129,19 @@ const Chat = () => {
 
     fetchConversations();
   }, [authenticatedFetch]);
+
+  useEffect(() => {
+    if (isInitialActiveConversation.current) {
+      isInitialActiveConversation.current = false;
+      return;
+    }
+
+    if (activeConversation) {
+      localStorage.setItem(activeConversationStorageKey, activeConversation);
+    } else {
+      localStorage.removeItem(activeConversationStorageKey);
+    }
+  }, [activeConversation]);
 
   const formatDate = (date: Date) => {
     const now = new Date();
@@ -154,6 +189,52 @@ const Chat = () => {
     setConversationToDelete(null);
   };
 
+  const enqueueStreamText = (text: string) => {
+    streamQueueRef.current.push(...(text.match(/\S+\s*/g) ?? [text]));
+
+    if (streamRevealTimerRef.current) return;
+
+    streamRevealTimerRef.current = window.setInterval(() => {
+      const nextWord = streamQueueRef.current.shift();
+      if (!nextWord) {
+        if (streamDoneRef.current) {
+          window.clearInterval(streamRevealTimerRef.current!);
+          streamRevealTimerRef.current = null;
+          setIsTyping(false);
+        }
+        return;
+      }
+
+      streamDisplayTextRef.current += nextWord;
+      const conversationId = streamConversationIdRef.current;
+      const messageId = streamMessageIdRef.current;
+      if (!conversationId || !messageId) return;
+
+      setIsTyping(false);
+      setConversations(prev => prev.map(conv => {
+        if (conv.id !== conversationId) return conv;
+
+        const hasMessage = conv.messages.some(message => message.id === messageId);
+        return {
+          ...conv,
+          messages: hasMessage
+            ? conv.messages.map(message =>
+                message.id === messageId
+                  ? { ...message, text: streamDisplayTextRef.current }
+                  : message
+              )
+            : [...conv.messages, {
+                id: messageId,
+                text: streamDisplayTextRef.current,
+                sender: 'ai',
+                timestamp: new Date(),
+              }],
+          updatedAt: new Date(),
+        };
+      }));
+    }, 45);
+  };
+
   const handleSendMessage = useCallback(() => {
     if (!newMessage.trim()) return;
 
@@ -187,13 +268,13 @@ const Chat = () => {
     setIsTyping(true);
     
     // use an api call to get the AI response instead of a simulated response
-    setTimeout(async () => {
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        text: '',
-        sender: 'ai',
-        timestamp: new Date()
-      };
+    (async () => {
+      let responseConversationId = activeConversation ?? localConversationId;
+      streamQueueRef.current = [];
+      streamDisplayTextRef.current = '';
+      streamConversationIdRef.current = responseConversationId;
+      streamMessageIdRef.current = `ai-${Date.now()}`;
+      streamDoneRef.current = false;
       try {
         const accessToken = localStorage.getItem('access_token');
         const response = await authenticatedFetch('http://localhost:8000/api/chat', {
@@ -209,41 +290,66 @@ const Chat = () => {
           }),
         });
 
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.detail || 'Failed to get a response');
-        setIsTyping(false);
-        aiMessage.text = data.output || "Sorry, I couldn't generate a response. Please try again.";
+        if (!response.ok || !response.body) throw new Error('Failed to get a response');
 
-        if (!activeConversation && data.conversation_id) {
-          setActiveConversation(data.conversation_id);
-          setConversations(prev => prev.map(conv =>
-            conv.id === localConversationId
-              ? { ...conv, id: data.conversation_id }
-              : conv
-          ));
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let bufferedText = '';
+        let streamFinished = false;
+
+        while (!streamFinished) {
+          const { value, done } = await reader.read();
+          bufferedText += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+          const events = bufferedText.split('\n');
+          bufferedText = events.pop() ?? '';
+
+          for (const eventText of events) {
+            if (!eventText.trim()) continue;
+            const event = JSON.parse(eventText);
+            if (event.type === 'start') {
+              responseConversationId = event.conversation_id;
+              streamConversationIdRef.current = responseConversationId;
+              setActiveConversation(responseConversationId);
+              setConversations(prev => prev.map(conv =>
+                conv.id === localConversationId
+                  ? { ...conv, id: responseConversationId }
+                  : conv
+              ));
+            } else if (event.type === 'chunk') {
+              enqueueStreamText(event.text);
+            } else if (event.type === 'done') {
+              streamFinished = true;
+              streamDoneRef.current = true;
+            }
+          }
+
+          if (done) streamFinished = true;
+        }
+
+        if (bufferedText.trim()) {
+          const event = JSON.parse(bufferedText);
+          if (event.type === 'chunk') {
+            enqueueStreamText(event.text);
+          } else if (event.type === 'done') {
+            streamDoneRef.current = true;
+          }
+        }
+
+        if (!streamQueueRef.current.length && !streamDisplayTextRef.current) {
+          setIsTyping(false);
         }
       } catch (error) {
         console.error('Error fetching AI response:', error);
-        //   text: "Sorry, I encountered an error while processing your request.",
+        streamQueueRef.current = [];
+        streamDoneRef.current = true;
+        setIsTyping(false);
         toast({
           title: 'Error',
           description: 'Failed to get a response from the AI. Please check your connection or try again later.',
         });
+        return;
       }
-      if (activeConversation) {
-        setConversations(prev => prev.map(conv =>
-          conv.id === activeConversation 
-            ? { ...conv, messages: [...conv.messages, aiMessage], updatedAt: new Date() }
-            : conv
-        ));
-      } else {
-        setConversations(prev => prev.map(conv =>
-          conv.id === localConversationId
-            ? { ...conv, messages: [...conv.messages, aiMessage], updatedAt: new Date() }
-            : conv
-        ));
-      }
-    }, 2000);
+    })();
   }, [newMessage, activeConversation, authenticatedFetch]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
