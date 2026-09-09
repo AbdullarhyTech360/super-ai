@@ -13,6 +13,8 @@ from app.db.session import get_session
 from app.db.database import create_db_and_tables
 from app.models.user import User
 from app.models.forms import SignUp, Login
+from app.schemas.conversation_role import Chat_role
+from app.services.conversation_ai import send_message
 
 import os
 from dotenv import load_dotenv
@@ -137,3 +139,79 @@ def get_current_user_info(
         "email": current_user.email,
         "full_name": current_user.full_name,
     }
+
+@app.post("/api/chat")
+def chat_with_ai(
+    chat_model: Chat_role,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    response = send_message(chat_model.input)
+
+    from app.models.chat import Conversation, Message
+
+    if chat_model.is_new or chat_model.conversation_id is None:
+        new_conversation = Conversation(
+            user_id=current_user.id,
+            title=chat_model.input[:50],
+        )
+        session.add(new_conversation)
+        session.commit()
+        session.refresh(new_conversation)
+        conversation = new_conversation
+    else:
+        conversation = session.get(Conversation, chat_model.conversation_id)
+        if conversation is None or conversation.user_id != current_user.id:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    session.add_all([
+        Message(conversation_id=conversation.id, text=chat_model.input, sender="user"),
+        Message(conversation_id=conversation.id, text=response, sender="ai"),
+    ])
+    conversation.updated_at = datetime.now(timezone.utc)
+    session.add(conversation)
+    session.commit()
+
+    return {"conversation_id": conversation.id, "output": response}
+
+# A route for fetching conversations for the current user
+@app.get("/api/conversations")
+def get_conversations(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    from app.models.chat import Conversation, Message
+
+    conversations = (
+        session.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .all()
+    )
+    return {"conversations": [
+        {
+            "id": conversation.id,
+            "title": conversation.title,
+            "updated_at": conversation.updated_at,
+            "messages": session.query(Message)
+            .filter(Message.conversation_id == conversation.id)
+            .order_by(Message.created_at)
+            .all(),
+        }
+        for conversation in conversations
+    ]}
+
+@app.delete("/api/conversations/{conversation_id}")
+def delete_conversation(
+    conversation_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    from app.models.chat import Conversation
+
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None or conversation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    session.delete(conversation)
+    session.commit()
+    return {"message": "Conversation was deleted successfully."}

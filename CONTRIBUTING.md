@@ -29,24 +29,23 @@ Thank you for contributing to our projects! This guide outlines our internal wor
    git clone https://github.com/AbdullarhyTech360/Super-AI.git
    ```
 
-2. **Switch to the Development Branch:**\
-   Use the `dev` branch as your base branch for development:
+2. **Switch to the Main Branch:**\
+   Use the `main` branch as your base branch for development:
 
-   ```bash
-   git checkout dev
-   ```
+  ```bash
+  git checkout main
+  ```
 
 3. **Install Dependencies:**\
-   Follow the project-specific instructions provided in the README or documentation.
+  Follow the project-specific instructions provided in the README or documentation.
 
 ---
-
 ## Development Workflow
 
 ### Branch Management
 
 - **Base Branch:**\
-  Always create new branches off of the `dev` branch rather than `main` (or `master`).
+  Always create new branches off of the `main` branch.
 
 - **Naming Conventions:**\
   Use the following format to name branches:
@@ -72,10 +71,10 @@ Thank you for contributing to our projects! This guide outlines our internal wor
   | `chore`   | Maintenance, refactoring, or documentation | `chore/108-update-readme`         |
 
 - **Keep Your Branch Updated:**\
-  Regularly sync with the `dev` branch to avoid conflicts:
+  Regularly sync with the `main` branch to avoid conflicts:
 
   ```bash
-  git pull origin dev --rebase
+  git pull origin main --rebase
   ```
 
 ### Commit Standards
@@ -220,8 +219,8 @@ When reporting issues, please follow these guidelines:
      >
      > Fixes #105
 
-5. **Request Reviews:**\
-   Tag the appropriate team members to review your changes.
+5. **Self-Review:**\
+  Review the changes, run the relevant checks, and verify the implementation before merging your PR.
 
 ---
 
@@ -229,16 +228,16 @@ When reporting issues, please follow these guidelines:
 
 - **Automated Checks:**\
   Your pull request must pass all CI/CD tests. [Coming Soon...]
-- **Peer Review:**\
-  At least one team member or maintainer will review your changes.
+- **Self-Review:**\
+  Review the diff, verify the tests and checks, and confirm that the change matches the issue before merging.
 - **Address Feedback:**\
-  Update your pull request based on review comments.
+  Address feedback from automated checks or optional external reviewers.
 - **Final Merge:**\
-  Only maintainers/reviewer can merge pull requests after approval. Do not merge your own PR.
+  The project owner may merge the pull request after completing the self-review.
 - **Squash and Merge:**\
   When merging, use squash and merge to combine all branch commits into a single commit. This creates clean deployment boundaries between environments and simplifies rollbacks. Each squashed commit should represent a complete, working feature. Delete the branch after merging.
 - **Merge Conflicts:**\
-   Resolve any merge conflicts before merging your pull request. If you encounter conflicts, rebase your branch against the `dev` branch and resolve them locally. After resolving, push the changes to your branch.
+  Resolve any merge conflicts before merging your pull request. If you encounter conflicts, rebase your branch against the `main` branch and resolve them locally. After resolving, push the changes to your branch.
 
 ---
 

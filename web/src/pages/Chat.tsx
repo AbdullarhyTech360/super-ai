@@ -49,7 +49,7 @@ const Chat = () => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, authenticatedFetch } = useAuth();
   const { toast } = useToast();
 
   const handleLogout = () => {
@@ -76,6 +76,38 @@ const Chat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [conversations, isTyping]);
 
+  // Add a logic to load conversations from the backend when the component mounts
+  useEffect(() => {
+    const fetchConversations = async () => {
+      try {
+        const response = await authenticatedFetch('http://localhost:8000/api/conversations',{
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        });
+        if (!response.ok) throw new Error('Failed to fetch conversations');
+        const data = await response.json();
+        setConversations((data.conversations ?? []).map((conversation: any) => ({
+          id: conversation.id,
+          title: conversation.title,
+          updatedAt: new Date(conversation.updated_at),
+          messages: (conversation.messages ?? []).map((message: any) => ({
+            id: message.id,
+            text: message.text,
+            sender: message.sender,
+            timestamp: new Date(message.created_at),
+          })),
+        })));
+      } catch (error) {
+        console.error('Error fetching conversations:', error);
+      }
+    };
+
+    fetchConversations();
+  }, [authenticatedFetch]);
+
   const formatDate = (date: Date) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -98,6 +130,12 @@ const Chat = () => {
   const confirmDelete = () => {
     if (conversationToDelete) {
       const conversationTitle = conversations.find(conv => conv.id === conversationToDelete)?.title || 'Conversation';
+      authenticatedFetch(`http://localhost:8000/api/conversations/${conversationToDelete}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      }).catch(error => console.error('Error deleting conversation:', error));
       setConversations(prev => prev.filter(conv => conv.id !== conversationToDelete));
       if (activeConversation === conversationToDelete) {
         setActiveConversation(null);
@@ -118,6 +156,8 @@ const Chat = () => {
 
   const handleSendMessage = useCallback(() => {
     if (!newMessage.trim()) return;
+
+    const localConversationId = activeConversation ?? Date.now().toString();
     
     const message: Message = {
       id: Date.now().toString(),
@@ -134,7 +174,7 @@ const Chat = () => {
       ));
     } else {
       const newConv: Conversation = {
-        id: Date.now().toString(),
+        id: localConversationId,
         title: newMessage.slice(0, 30) + (newMessage.length > 30 ? '...' : ''),
         messages: [message],
         updatedAt: new Date()
@@ -146,31 +186,65 @@ const Chat = () => {
     setNewMessage('');
     setIsTyping(true);
     
-    // Simulate AI response with typing indicator
-    setTimeout(() => {
-      setIsTyping(false);
+    // use an api call to get the AI response instead of a simulated response
+    setTimeout(async () => {
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
-        text: "I'm a demo AI assistant. This is a simulated response to your message: \"" + message.text + "\"",
+        text: '',
         sender: 'ai',
         timestamp: new Date()
       };
-      
+      try {
+        const accessToken = localStorage.getItem('access_token');
+        const response = await authenticatedFetch('http://localhost:8000/api/chat', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            input: message.text,
+            conversation_id: activeConversation,
+            is_new: !activeConversation, // If there's no active conversation, it's a new one
+          }),
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Failed to get a response');
+        setIsTyping(false);
+        aiMessage.text = data.output || "Sorry, I couldn't generate a response. Please try again.";
+
+        if (!activeConversation && data.conversation_id) {
+          setActiveConversation(data.conversation_id);
+          setConversations(prev => prev.map(conv =>
+            conv.id === localConversationId
+              ? { ...conv, id: data.conversation_id }
+              : conv
+          ));
+        }
+      } catch (error) {
+        console.error('Error fetching AI response:', error);
+        //   text: "Sorry, I encountered an error while processing your request.",
+        toast({
+          title: 'Error',
+          description: 'Failed to get a response from the AI. Please check your connection or try again later.',
+        });
+      }
       if (activeConversation) {
-        setConversations(prev => prev.map(conv => 
+        setConversations(prev => prev.map(conv =>
           conv.id === activeConversation 
             ? { ...conv, messages: [...conv.messages, aiMessage], updatedAt: new Date() }
             : conv
         ));
       } else {
-        setConversations(prev => prev.map((conv, index) => 
-          index === 0 
+        setConversations(prev => prev.map(conv =>
+          conv.id === localConversationId
             ? { ...conv, messages: [...conv.messages, aiMessage], updatedAt: new Date() }
             : conv
         ));
       }
     }, 2000);
-  }, [newMessage, activeConversation]);
+  }, [newMessage, activeConversation, authenticatedFetch]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {

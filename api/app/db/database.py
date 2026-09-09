@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from sqlmodel import SQLModel, create_engine
+from app.models.chat import Conversation, Message
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 DATA_DIR.mkdir(exist_ok=True)
