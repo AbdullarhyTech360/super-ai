@@ -20,6 +20,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import MarkdownMessage from '@/components/MarkdownMessage';
 
 interface Message {
   id: string;
@@ -256,7 +257,7 @@ const Chat = () => {
     } else {
       const newConv: Conversation = {
         id: localConversationId,
-        title: newMessage.slice(0, 30) + (newMessage.length > 30 ? '...' : ''),
+        title: 'Generating title...',
         messages: [message],
         updatedAt: new Date()
       };
@@ -312,7 +313,17 @@ const Chat = () => {
               setActiveConversation(responseConversationId);
               setConversations(prev => prev.map(conv =>
                 conv.id === localConversationId
-                  ? { ...conv, id: responseConversationId }
+                  ? {
+                      ...conv,
+                      id: responseConversationId,
+                      ...(event.title ? { title: event.title } : {}),
+                    }
+                  : conv
+              ));
+            } else if (event.type === 'title') {
+              setConversations(prev => prev.map(conv =>
+                conv.id === responseConversationId || conv.id === localConversationId
+                  ? { ...conv, title: event.title }
                   : conv
               ));
             } else if (event.type === 'chunk') {
@@ -572,9 +583,13 @@ const Chat = () => {
                         !showAvatar && message.sender === 'user' && "rounded-br-2xl",
                         !showAvatar && message.sender === 'ai' && "rounded-bl-2xl"
                       )}>
-                        <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
-                          {message.text}
-                        </p>
+                        {message.sender === 'ai' ? (
+                          <MarkdownMessage content={message.text} />
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                            {message.text}
+                          </p>
+                        )}
                         {isLastInGroup && (
                           <div className={cn(
                             "mt-2 text-xs opacity-70 flex",
@@ -656,43 +671,52 @@ const Chat = () => {
         {/* Input Area */}
         <div className="p-4 border-t border-border bg-background/95 backdrop-blur-md shadow-elegant">
           <div className="max-w-4xl mx-auto w-full">
-            <div className="flex items-end gap-3 p-3 bg-card/50 backdrop-blur-sm rounded-2xl border border-border shadow-modern hover:shadow-elegant smooth-transition w-full">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="text-muted-foreground hover:text-foreground hover:bg-hover-muted fast-transition flex-shrink-0"
-              >
-                <Paperclip className="w-4 h-4" />
-              </Button>
-              
-              <div className="flex-1 min-w-0">
+            <div className="flex items-end gap-2 p-2 bg-card/50 backdrop-blur-sm rounded-2xl border border-border shadow-modern hover:shadow-elegant smooth-transition w-full">
+              <div className="relative flex-1 min-w-0">
                 <Textarea
                   ref={textareaRef}
                   placeholder="Message Super AI... (Enter to send, Shift+Enter for new line)"
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
-                  className="w-full min-h-[24px] max-h-32 resize-none border-0 bg-transparent focus-visible:ring-0 text-foreground placeholder:text-muted-foreground leading-relaxed p-0"
-                  rows={1}
+                  aria-label="Message Super AI"
+                  className="w-full min-h-[96px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 pb-12 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  rows={3}
                 />
-              </div>
-              
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {!newMessage.trim() ? (
+
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute bottom-2 left-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                  aria-label="Attach a file"
+                  title="Attach a file"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </Button>
+
+                {!newMessage.trim() && (
                   <Button
+                    type="button"
                     variant="ghost"
                     size="sm"
                     onClick={() => setIsVoiceRecording(!isVoiceRecording)}
                     className={cn(
-                      "transition-all duration-200 h-8 w-8 p-0",
-                      isVoiceRecording 
-                        ? "text-destructive hover:text-destructive/80 animate-pulse" 
-                        : "text-muted-foreground hover:text-foreground hover:bg-hover-muted"
+                      "absolute bottom-2 right-2 z-10 h-8 w-8 p-0 transition-all duration-200",
+                      isVoiceRecording
+                        ? "text-destructive hover:text-destructive/80 animate-pulse"
+                        : "text-muted-foreground hover:bg-hover-muted hover:text-foreground"
                     )}
+                    aria-label={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
+                    title={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
                   >
                     {isVoiceRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                   </Button>
-                ) : (
+                )}
+              </div>
+              
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {newMessage.trim() && (
                   <Button
                     onClick={handleSendMessage}
                     disabled={isTyping}

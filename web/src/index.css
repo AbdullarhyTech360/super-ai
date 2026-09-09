@@ -193,6 +193,62 @@ All colors MUST be HSL.
   .modern-card {
     @apply bg-card/80 backdrop-blur-sm border border-border/50 shadow-md hover:shadow-lg transition-all duration-200;
   }
+
+  .markdown-message > :first-child {
+    margin-top: 0;
+  }
+
+  .markdown-message > :last-child {
+    margin-bottom: 0;
+  }
+
+  .markdown-message h1,
+  .markdown-message h2,
+  .markdown-message h3,
+  .markdown-message h4 {
+    @apply mt-4 mb-2 font-semibold;
+  }
+
+  .markdown-message h1 { @apply text-xl; }
+  .markdown-message h2 { @apply text-lg; }
+  .markdown-message h3 { @apply text-base; }
+  .markdown-message p,
+  .markdown-message ul,
+  .markdown-message ol,
+  .markdown-message blockquote,
+  .markdown-message table {
+    @apply my-3;
+  }
+
+  .markdown-message ul { @apply list-disc pl-5; }
+  .markdown-message ol { @apply list-decimal pl-5; }
+  .markdown-message li { @apply my-1; }
+  .markdown-message a { @apply text-primary underline underline-offset-2; }
+  .markdown-message blockquote { @apply border-l-2 border-primary/50 pl-3 italic text-muted-foreground; }
+  .markdown-message table { @apply block max-w-full overflow-x-auto border-collapse; }
+  .markdown-message th,
+  .markdown-message td { @apply border border-border px-3 py-2 text-left; }
+  .markdown-message th { @apply bg-muted font-semibold; }
+
+  .markdown-code-block {
+    @apply my-3 overflow-hidden rounded-md border border-border bg-muted/50;
+  }
+
+  .markdown-code-header {
+    @apply flex min-h-9 items-center justify-between border-b border-border px-3;
+  }
+
+  .markdown-code-content {
+    @apply m-0 overflow-x-auto p-3;
+  }
+
+  .markdown-code-content pre {
+    @apply m-0;
+  }
+
+  .markdown-message .katex-display {
+    @apply my-4 max-w-full overflow-x-auto overflow-y-hidden py-1;
+  }
   
   /* Enhanced button hover states */
   .btn-hover-primary {
