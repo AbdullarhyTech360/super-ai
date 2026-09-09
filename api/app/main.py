@@ -15,7 +15,7 @@ from app.db.database import create_db_and_tables
 from app.models.user import User
 from app.models.forms import SignUp, Login
 from app.schemas.conversation_role import Chat_role
-from app.services.conversation_ai import send_message_stream
+from app.services.conversation_ai import send_message_stream, send_message_stream_with_title
 
 import os
 from dotenv import load_dotenv
@@ -174,16 +174,34 @@ def chat_with_ai(
 
     def stream_response():
         import json
+        fallback_title = " ".join(chat_model.input.split())[:50].strip()
 
         yield json.dumps({
             "type": "start",
             "conversation_id": conversation_id,
+            "title": fallback_title if chat_model.is_new or chat_model.conversation_id is None else None,
         }) + "\n"
 
         response_parts = []
-        for chunk in send_message_stream(chat_model.input, history):
-            response_parts.append(chunk)
-            yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
+        if chat_model.is_new or chat_model.conversation_id is None:
+            stream = send_message_stream_with_title(chat_model.input, history)
+            title = ""
+            for event_type, value in stream:
+                if event_type == "title":
+                    title = " ".join(value.split())[:50].strip()
+                    if not title:
+                        title = " ".join(chat_model.input.split())[:50].strip()
+                    conversation.title = title
+                    session.add(conversation)
+                    session.commit()
+                    yield json.dumps({"type": "title", "title": title}) + "\n"
+                else:
+                    response_parts.append(value)
+                    yield json.dumps({"type": "chunk", "text": value}) + "\n"
+        else:
+            for chunk in send_message_stream(chat_model.input, history):
+                response_parts.append(chunk)
+                yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
 
         response = "".join(response_parts)
         session.add_all([
