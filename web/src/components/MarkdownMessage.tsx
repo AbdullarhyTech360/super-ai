@@ -29,6 +29,29 @@ const programmingLanguages = new Set([
   'sql', 'swift', 'typescript', 'ts', 'tsx', 'jsx', 'xml', 'yaml', 'yml',
 ]);
 
+const getCodeText = (node: ReactNode): string => {
+  if (typeof node === 'string' || typeof node === 'number') {
+    return String(node);
+  }
+  if (Array.isArray(node)) {
+    return node.map(getCodeText).join('');
+  }
+  if (React.isValidElement(node)) {
+    return getCodeText(node.props.children as ReactNode);
+  }
+  return '';
+};
+
+const cleanHeadingText = (node: ReactNode): ReactNode => {
+  if (typeof node === 'string') {
+    return node.replace(/^\s*#{1,6}\s+/, '');
+  }
+  if (Array.isArray(node)) {
+    return node.map(cleanHeadingText);
+  }
+  return node;
+};
+
 const normalizeMarkdownHeadings = (markdown: string) => {
   let insideCodeFence = false;
 
@@ -38,7 +61,9 @@ const normalizeMarkdownHeadings = (markdown: string) => {
       return line;
     }
     if (insideCodeFence) return line;
-    return line.replace(/^(\s{0,3})(#{1,6})(?=\S)/, '$1$2 ');
+    return line
+      .replace(/^(\s{0,3})\\(#{1,6})(?=\s|\S)/, '$1$2 ')
+      .replace(/^(\s{0,3})(#{1,6})(?=\S)/, '$1$2 ');
   }).join('\n');
 };
 
@@ -68,13 +93,31 @@ const MarkdownMessage = ({ content }: MarkdownMessageProps) => {
         </code>
       );
     },
+    h1({ children, ...props }) {
+      return <h1 {...props}>{cleanHeadingText(children)}</h1>;
+    },
+    h2({ children, ...props }) {
+      return <h2 {...props}>{cleanHeadingText(children)}</h2>;
+    },
+    h3({ children, ...props }) {
+      return <h3 {...props}>{cleanHeadingText(children)}</h3>;
+    },
+    h4({ children, ...props }) {
+      return <h4 {...props}>{cleanHeadingText(children)}</h4>;
+    },
+    h5({ children, ...props }) {
+      return <h5 {...props}>{cleanHeadingText(children)}</h5>;
+    },
+    h6({ children, ...props }) {
+      return <h6 {...props}>{cleanHeadingText(children)}</h6>;
+    },
     pre({ children }) {
       const codeElement = React.Children.toArray(children)[0];
       const codeProps = React.isValidElement(codeElement)
         ? codeElement.props as CodeProps
         : {};
       const language = codeProps.className?.match(/language-(\S+)/)?.[1];
-      const code = String(codeProps.children ?? '').replace(/\n$/, '');
+      const code = getCodeText(codeProps.children).replace(/\n$/, '');
       const canCopy = language ? programmingLanguages.has(language.toLowerCase()) : false;
 
       return (
