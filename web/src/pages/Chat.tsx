@@ -1,12 +1,20 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Send, Plus, Search, Menu, X, Paperclip, Mic, MicOff, Bot, User, Settings, CircleHelp, LogOut } from 'lucide-react';
+import { Send, Plus, Search, Menu, X, Paperclip, Mic, MicOff, Bot, User, Settings, CircleHelp, LogOut, ListFilter } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   AlertDialog,
   AlertDialogAction,
@@ -33,14 +41,18 @@ interface Conversation {
   id: string;
   title: string;
   messages: Message[];
+  createdAt: Date;
   updatedAt: Date;
 }
+
+type ConversationSort = 'last-used' | 'name' | 'created';
 
 const Chat = () => {
   const activeConversationStorageKey = 'active_conversation_id';
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
+  const [conversationSort, setConversationSort] = useState<ConversationSort>('last-used');
   const [newMessage, setNewMessage] = useState('');
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -107,6 +119,7 @@ const Chat = () => {
         const loadedConversations = (data.conversations ?? []).map((conversation: any) => ({
           id: conversation.id,
           title: conversation.title,
+          createdAt: new Date(conversation.created_at ?? conversation.updated_at),
           updatedAt: new Date(conversation.updated_at),
           messages: (conversation.messages ?? []).map((message: any) => ({
             id: message.id,
@@ -259,6 +272,7 @@ const Chat = () => {
         id: localConversationId,
         title: 'Generating title...',
         messages: [message],
+        createdAt: new Date(),
         updatedAt: new Date()
       };
       setConversations(prev => [newConv, ...prev]);
@@ -375,9 +389,17 @@ const Chat = () => {
   }, [handleSendMessage]);
 
   const currentConversation = conversations.find(conv => conv.id === activeConversation);
-  const filteredConversations = conversations.filter(conv =>
-    conv.title.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredConversations = conversations
+    .filter(conv => conv.title.toLowerCase().includes(searchTerm.toLowerCase()))
+    .sort((first, second) => {
+      if (conversationSort === 'name') {
+        return first.title.localeCompare(second.title);
+      }
+
+      const firstDate = conversationSort === 'created' ? first.createdAt : first.updatedAt;
+      const secondDate = conversationSort === 'created' ? second.createdAt : second.updatedAt;
+      return secondDate.getTime() - firstDate.getTime();
+    });
 
   return (
     <div className="h-screen flex bg-background overflow-hidden w-full">
@@ -428,6 +450,26 @@ const Chat = () => {
                 className="pl-10 bg-muted/30 border-border fast-transition focus:shadow-glow"
               />
             </div>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="sm" className="w-full mt-2 justify-start gap-2 text-muted-foreground hover:text-foreground">
+                  <ListFilter className="w-4 h-4" />
+                  Sort: {conversationSort === 'last-used' ? 'Last used' : conversationSort === 'name' ? 'Name' : 'Created'}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-64">
+                <DropdownMenuLabel>Arrange conversations</DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={conversationSort}
+                  onValueChange={(value) => setConversationSort(value as ConversationSort)}
+                >
+                  <DropdownMenuRadioItem value="last-used">Last used</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="created">Time created</DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
 
           {/* Conversation List */}

@@ -1,5 +1,6 @@
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { User, Bell, Shield, Palette, Globe, LogOut, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,21 +11,73 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import Navbar from '@/components/Navbar';
+import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
+import { useToast } from '@/hooks/use-toast';
+
+interface CurrentUser {
+  id: string;
+  full_name: string;
+  email: string;
+}
+
+interface SettingsState {
+  name: string;
+  email: string;
+  notifications: boolean;
+  soundEnabled: boolean;
+  language: string;
+  autoSave: boolean;
+}
 
 const Settings = () => {
-  const [settings, setSettings] = useState({
-    name: 'John Doe',
-    email: 'john@example.com',
+  const { authenticatedFetch, logout } = useAuth();
+  const { theme, setTheme } = useTheme();
+  const { toast } = useToast();
+  const navigate = useNavigate();
+  const [settings, setSettings] = useState<SettingsState>({
+    name: '',
+    email: '',
     notifications: true,
     soundEnabled: true,
-    darkMode: false,
     language: 'en',
-    autoSave: true
+    autoSave: true,
   });
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
-  type Settings = typeof settings;
+  useEffect(() => {
+    const loadSettings = async () => {
+      try {
+        const response = await authenticatedFetch('http://localhost:8000/api/me', {
+          headers: {
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        });
+        if (!response.ok) throw new Error('Unable to load account settings');
 
-  const handleSettingChange = <Key extends keyof Settings>(key: Key, value: Settings[Key]) => {
+        const user: CurrentUser = await response.json();
+        setSettings(prev => ({
+          ...prev,
+          name: user.full_name,
+          email: user.email,
+          notifications: localStorage.getItem('notifications_enabled') !== 'false',
+          soundEnabled: localStorage.getItem('sound_enabled') !== 'false',
+          language: localStorage.getItem('language') || 'en',
+          autoSave: localStorage.getItem('auto_save_conversations') !== 'false',
+        }));
+      } catch (error) {
+        console.error('Error loading settings:', error);
+        setLoadError('Unable to load your settings right now.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadSettings();
+  }, [authenticatedFetch]);
+
+  const handleSettingChange = <Key extends keyof SettingsState>(key: Key, value: SettingsState[Key]) => {
     setSettings(prev => ({
       ...prev,
       [key]: value
@@ -32,9 +85,43 @@ const Settings = () => {
   };
 
   const handleSave = () => {
-    console.log('Saving settings:', settings);
-    // TODO: Implement actual save logic
+    localStorage.setItem('notifications_enabled', String(settings.notifications));
+    localStorage.setItem('sound_enabled', String(settings.soundEnabled));
+    localStorage.setItem('language', settings.language);
+    localStorage.setItem('auto_save_conversations', String(settings.autoSave));
+    toast({ title: 'Settings saved', description: 'Your application preferences have been saved.' });
   };
+
+  const handleSignOut = () => {
+    logout();
+    navigate('/');
+  };
+
+  const initials = settings.name
+    .split(' ')
+    .filter(Boolean)
+    .map(namePart => namePart[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="pt-24 text-center text-muted-foreground">Loading settings...</div>
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="pt-24 text-center text-muted-foreground">{loadError}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -60,10 +147,9 @@ const Settings = () => {
                  <div className="flex flex-col sm:flex-row items-center gap-4">
                    <Avatar className="w-16 h-16">
                      <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-xl">
-                       {settings.name.split(' ').map(n => n[0]).join('')}
+                       {initials}
                      </AvatarFallback>
                    </Avatar>
-                   <Button variant="outline" className="w-full sm:w-auto">Change Avatar</Button>
                  </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -72,7 +158,8 @@ const Settings = () => {
                     <Input
                       id="name"
                       value={settings.name}
-                      onChange={(e) => handleSettingChange('name', e.target.value)}
+                      readOnly
+                      disabled
                     />
                   </div>
                   <div className="space-y-2">
@@ -81,7 +168,8 @@ const Settings = () => {
                       id="email"
                       type="email"
                       value={settings.email}
-                      onChange={(e) => handleSettingChange('email', e.target.value)}
+                      readOnly
+                      disabled
                     />
                   </div>
                 </div>
@@ -141,8 +229,8 @@ const Settings = () => {
                    </div>
                   <Switch
                     id="darkMode"
-                    checked={settings.darkMode}
-                    onCheckedChange={(checked) => handleSettingChange('darkMode', checked)}
+                    checked={theme === 'dark'}
+                    onCheckedChange={(checked) => setTheme(checked ? 'dark' : 'light')}
                   />
                 </div>
               </CardContent>
@@ -197,13 +285,13 @@ const Settings = () => {
                 </CardTitle>
               </CardHeader>
                <CardContent className="space-y-3 sm:space-y-4">
-                 <Button variant="outline" className="w-full justify-start text-sm sm:text-base">
+                 <Button variant="outline" disabled className="w-full justify-start text-sm sm:text-base">
                    Change Password
                  </Button>
-                 <Button variant="outline" className="w-full justify-start text-sm sm:text-base">
+                 <Button variant="outline" disabled className="w-full justify-start text-sm sm:text-base">
                    Two-Factor Authentication
                  </Button>
-                 <Button variant="outline" className="w-full justify-start text-sm sm:text-base">
+                 <Button variant="outline" disabled className="w-full justify-start text-sm sm:text-base">
                    Download My Data
                  </Button>
                </CardContent>
@@ -212,7 +300,7 @@ const Settings = () => {
             {/* Account Actions */}
             <Card>
               <CardContent className="pt-6">
-                <Button variant="destructive" className="w-full justify-center">
+                <Button variant="destructive" onClick={handleSignOut} className="w-full justify-center">
                   <LogOut className="w-4 h-4 mr-2" />
                   Sign Out
                 </Button>
