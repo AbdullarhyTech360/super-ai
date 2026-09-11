@@ -1,26 +1,112 @@
-import { useState } from 'react';
-import { User, Camera, Calendar, MapPin, Mail, Phone, Edit, Star, Award, MessageCircle } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { useEffect, useState } from 'react';
+import { User, Mail, Award, MessageCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import Navbar from '@/components/Navbar';
+import { useAuth } from '@/hooks/useAuth';
+
+interface ProfileUser {
+  id: string;
+  full_name: string;
+  email: string;
+}
+
+interface ProfileMessage {
+  id: string;
+  text: string;
+  sender: 'user' | 'ai';
+  created_at: string;
+}
+
+interface ProfileConversation {
+  id: string;
+  title: string;
+  updated_at: string;
+  messages: ProfileMessage[];
+}
 
 const Profile = () => {
-  const [user] = useState({
-    name: 'John Doe',
-    email: 'john@example.com',
-    phone: '+1 (555) 123-4567',
-    location: 'New York, USA',
-    joinDate: 'January 2024',
-    bio: 'AI enthusiast and tech professional passionate about innovative solutions.',
-    stats: {
-      conversations: 127,
-      totalMessages: 2849,
-      favoriteTopics: ['Technology', 'AI', 'Programming', 'Design']
-    }
+  const { authenticatedFetch } = useAuth();
+  const [user, setUser] = useState<ProfileUser | null>(null);
+  const [conversations, setConversations] = useState<ProfileConversation[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      try {
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        };
+        const [userResponse, conversationsResponse] = await Promise.all([
+          authenticatedFetch('http://localhost:8000/api/me', { headers }),
+          authenticatedFetch('http://localhost:8000/api/conversations', { headers }),
+        ]);
+
+        if (!userResponse.ok || !conversationsResponse.ok) {
+          throw new Error('Unable to load profile data');
+        }
+
+        const userData = await userResponse.json();
+        const conversationsData = await conversationsResponse.json();
+        setUser(userData);
+        setConversations(conversationsData.conversations ?? []);
+      } catch (error) {
+        console.error('Error loading profile:', error);
+        setLoadError('Unable to load your profile right now.');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadProfile();
+  }, [authenticatedFetch]);
+
+  const displayName = user?.full_name || 'User';
+  const initials = displayName
+    .split(' ')
+    .filter(Boolean)
+    .map(namePart => namePart[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
+  const messages = conversations.flatMap(conversation => conversation.messages ?? []);
+  const userMessages = messages.filter(message => message.sender === 'user');
+  const thisMonthMessages = userMessages.filter(message => {
+    const messageDate = new Date(message.created_at);
+    const now = new Date();
+    return messageDate.getFullYear() === now.getFullYear()
+      && messageDate.getMonth() === now.getMonth();
   });
+  const recentConversations = [...conversations]
+    .sort((first, second) => new Date(second.updated_at).getTime() - new Date(first.updated_at).getTime())
+    .slice(0, 3);
+
+  const formatActivityDate = (date: string) => new Date(date).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+  });
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="pt-24 text-center text-muted-foreground">Loading profile...</div>
+      </div>
+    );
+  }
+
+  if (loadError || !user) {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navbar />
+        <div className="pt-24 text-center text-muted-foreground">{loadError || 'Profile unavailable.'}</div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -38,42 +124,21 @@ const Profile = () => {
                       style={{ background: 'var(--gradient-primary)' }}
                       className="text-white text-2xl sm:text-3xl"
                     >
-                      {user.name.split(' ').map(n => n[0]).join('')}
+                      {initials}
                     </AvatarFallback>
                   </Avatar>
-                  <Button 
-                    size="icon" 
-                    className="absolute -bottom-2 -right-2 w-8 h-8 rounded-full"
-                    style={{ background: 'var(--gradient-primary)' }}
-                  >
-                    <Camera className="w-4 h-4" />
-                  </Button>
                 </div>
                 
                 <div className="flex-1 text-center sm:text-left">
-                  <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">{user.name}</h1>
-                  <p className="text-muted-foreground mb-4">{user.bio}</p>
+                  <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">{displayName}</h1>
                   
                   <div className="flex flex-wrap justify-center sm:justify-start gap-4 text-sm text-muted-foreground">
                     <div className="flex items-center gap-1">
                       <Mail className="w-4 h-4" />
                       <span>{user.email}</span>
                     </div>
-                    <div className="flex items-center gap-1">
-                      <MapPin className="w-4 h-4" />
-                      <span>{user.location}</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Calendar className="w-4 h-4" />
-                      <span>Joined {user.joinDate}</span>
-                    </div>
                   </div>
                 </div>
-                
-                <Button variant="outline" className="w-full sm:w-auto">
-                  <Edit className="w-4 h-4 mr-2" />
-                  Edit Profile
-                </Button>
               </div>
             </CardContent>
           </Card>
@@ -91,14 +156,14 @@ const Profile = () => {
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Total Conversations</span>
                   <Badge variant="secondary" className="font-bold">
-                    {user.stats.conversations}
+                    {conversations.length}
                   </Badge>
                 </div>
                 <Separator />
                 <div className="flex justify-between items-center">
                   <span className="text-muted-foreground">Messages Sent</span>
                   <Badge variant="secondary" className="font-bold">
-                    {user.stats.totalMessages.toLocaleString()}
+                    {userMessages.length.toLocaleString()}
                   </Badge>
                 </div>
                 <Separator />
@@ -108,31 +173,8 @@ const Profile = () => {
                     className="text-primary-foreground font-bold"
                     style={{ background: 'var(--gradient-primary)' }}
                   >
-                    156 messages
+                    {thisMonthMessages.length.toLocaleString()} messages
                   </Badge>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Favorite Topics */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Star className="w-5 h-5" />
-                  Favorite Topics
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-2">
-                  {user.stats.favoriteTopics.map((topic, index) => (
-                    <Badge 
-                      key={index} 
-                      variant="outline"
-                      className="border-primary/30 text-primary hover:bg-primary/10"
-                    >
-                      {topic}
-                    </Badge>
-                  ))}
                 </div>
               </CardContent>
             </Card>
@@ -147,16 +189,12 @@ const Profile = () => {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center gap-3">
-                  <Phone className="w-4 h-4 text-muted-foreground" />
-                  <span>{user.phone}</span>
+                  <User className="w-4 h-4 text-muted-foreground" />
+                  <span className="truncate">Account ID: {user.id}</span>
                 </div>
                 <div className="flex items-center gap-3">
                   <Mail className="w-4 h-4 text-muted-foreground" />
                   <span>{user.email}</span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <MapPin className="w-4 h-4 text-muted-foreground" />
-                  <span>{user.location}</span>
                 </div>
               </CardContent>
             </Card>
@@ -170,18 +208,15 @@ const Profile = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
-                <div className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
-                  <div className="w-2 h-2 bg-green-500 rounded-full"></div>
-                  <span className="text-sm">Started a new conversation about AI trends</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
-                  <div className="w-2 h-2 bg-blue-500 rounded-full"></div>
-                  <span className="text-sm">Updated profile information</span>
-                </div>
-                <div className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
-                  <div className="w-2 h-2 bg-purple-500 rounded-full"></div>
-                  <span className="text-sm">Completed 50+ conversations this month</span>
-                </div>
+                {recentConversations.length > 0 ? recentConversations.map(conversation => (
+                  <div key={conversation.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
+                    <div className="w-2 h-2 bg-primary rounded-full"></div>
+                    <span className="text-sm truncate flex-1">{conversation.title}</span>
+                    <span className="text-xs text-muted-foreground">{formatActivityDate(conversation.updated_at)}</span>
+                  </div>
+                )) : (
+                  <p className="text-sm text-muted-foreground">No conversation activity yet.</p>
+                )}
               </CardContent>
             </Card>
           </div>

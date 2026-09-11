@@ -231,18 +231,23 @@ def get_conversations(
         .filter(Conversation.user_id == current_user.id)
         .all()
     )
-    return {"conversations": [
-        {
-            "id": conversation.id,
-            "title": conversation.title,
-            "updated_at": conversation.updated_at,
-            "messages": session.query(Message)
+    conversation_data = []
+    for conversation in conversations:
+        messages = (
+            session.query(Message)
             .filter(Message.conversation_id == conversation.id)
             .order_by(Message.created_at)
-            .all(),
-        }
-        for conversation in conversations
-    ]}
+            .all()
+        )
+        conversation_data.append({
+            "id": conversation.id,
+            "title": conversation.title,
+            "created_at": messages[0].created_at if messages else conversation.updated_at,
+            "updated_at": conversation.updated_at,
+            "messages": messages,
+        })
+
+    return {"conversations": conversation_data}
 
 @app.delete("/api/conversations/{conversation_id}")
 def delete_conversation(
