@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Send, Plus, Search, Menu, X, Paperclip, Mic, MicOff, Bot, User, Settings, CircleHelp, LogOut, ListFilter } from 'lucide-react';
+import { Send, Plus, Search, Menu, X, Paperclip, Mic, MicOff, Bot, User, Settings, CircleHelp, LogOut, ListFilter, Pencil, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -29,6 +29,7 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import MarkdownMessage from '@/components/MarkdownMessage';
+import AboutDeveloper from '@/components/AboutDeveloper';
 
 interface Message {
   id: string;
@@ -43,6 +44,21 @@ interface Conversation {
   messages: Message[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+interface MessageDto {
+  id: string;
+  text: string;
+  sender: 'user' | 'ai';
+  created_at: string;
+}
+
+interface ConversationDto {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+  messages?: MessageDto[];
 }
 
 type ConversationSort = 'last-used' | 'name' | 'created';
@@ -62,6 +78,10 @@ const Chat = () => {
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [conversationToRename, setConversationToRename] = useState<string | null>(null);
+  const [renameTitle, setRenameTitle] = useState('');
+  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const isInitialActiveConversation = useRef(true);
   const streamQueueRef = useRef<string[]>([]);
   const streamDisplayTextRef = useRef('');
@@ -78,6 +98,14 @@ const Chat = () => {
     navigate('/');
   };
 
+  const handleNewChat = () => {
+    setActiveConversation(null);
+    setNewMessage('');
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+    });
+  };
+
   useEffect(() => {
     const handleResize = () => {
       setIsMobile(window.innerWidth < 768);
@@ -92,6 +120,10 @@ const Chat = () => {
       textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
     }
   }, [newMessage]);
+
+  useEffect(() => {
+    textareaRef.current?.focus();
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -115,13 +147,13 @@ const Chat = () => {
           },
         });
         if (!response.ok) throw new Error('Failed to fetch conversations');
-        const data = await response.json();
-        const loadedConversations = (data.conversations ?? []).map((conversation: any) => ({
+        const data = (await response.json()) as { conversations?: ConversationDto[] };
+        const loadedConversations = (data.conversations ?? []).map((conversation: ConversationDto) => ({
           id: conversation.id,
           title: conversation.title,
           createdAt: new Date(conversation.created_at ?? conversation.updated_at),
           updatedAt: new Date(conversation.updated_at),
-          messages: (conversation.messages ?? []).map((message: any) => ({
+          messages: (conversation.messages ?? []).map((message: MessageDto) => ({
             id: message.id,
             text: message.text,
             sender: message.sender,
@@ -201,6 +233,47 @@ const Chat = () => {
   const cancelDelete = () => {
     setDeleteDialogOpen(false);
     setConversationToDelete(null);
+  };
+
+  const handleRenameClick = (id: string, title: string) => {
+    setConversationToRename(id);
+    setRenameTitle(title);
+    setRenameDialogOpen(true);
+  };
+
+  const confirmRename = () => {
+    if (conversationToRename) {
+      const trimmedTitle = renameTitle.trim();
+      if (!trimmedTitle) {
+        setRenameDialogOpen(false);
+        setConversationToRename(null);
+        return;
+      }
+      authenticatedFetch(`http://localhost:8000/api/conversations/${conversationToRename}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({ title: trimmedTitle }),
+      }).catch(error => console.error('Error renaming conversation:', error));
+      setConversations(prev => prev.map(conv =>
+        conv.id === conversationToRename
+          ? { ...conv, title: trimmedTitle, updatedAt: new Date() }
+          : conv
+      ));
+      toast({
+        title: "Chat renamed",
+        description: `Conversation renamed to "${trimmedTitle}".`,
+      });
+    }
+    setRenameDialogOpen(false);
+    setConversationToRename(null);
+  };
+
+  const cancelRename = () => {
+    setRenameDialogOpen(false);
+    setConversationToRename(null);
   };
 
   const enqueueStreamText = (text: string) => {
@@ -375,7 +448,7 @@ const Chat = () => {
         return;
       }
     })();
-  }, [newMessage, activeConversation, authenticatedFetch]);
+  }, [newMessage, activeConversation, authenticatedFetch, toast]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
@@ -433,7 +506,7 @@ const Chat = () => {
             </div>
             
             <Button 
-              onClick={() => setActiveConversation(null)}
+              onClick={handleNewChat}
               className="w-full mb-4 smooth-transition hover:shadow-glow"
               style={{ background: 'var(--gradient-primary)' }}
             >
@@ -485,37 +558,76 @@ const Chat = () => {
                       ? "bg-accent text-accent-foreground shadow-modern border border-border/50" 
                       : "hover:bg-hover-muted text-foreground"
                   )}
-                >
-                  <div className="flex items-center gap-3">
-                    <Avatar className="w-8 h-8 flex-shrink-0 avatar-glow">
-                      <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-xs">
-                        <Bot className="w-4 h-4" />
-                      </AvatarFallback>
-                    </Avatar>
+>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <h3 className="font-medium text-sm truncate">{conversation.title}</h3>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteClick(conversation.id, conversation.title);
-                          }}
-                          className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
-                        >
-                          <X className="w-3 h-3" />
-                        </Button>
+                        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRenameClick(conversation.id, conversation.title);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                            title="Rename chat"
+                          >
+                            <Pencil className="w-3 h-3" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(conversation.id, conversation.title);
+                            }}
+                            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                            title="Delete chat"
+                          >
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
                         {formatDate(conversation.updatedAt)}
                       </p>
                     </div>
                   </div>
-                </div>
               ))}
             </div>
           </ScrollArea>
+
+          {/* Sidebar Footer */}
+          <div className="border-t border-border p-3 space-y-1 shrink-0">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/settings')}
+              className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
+            >
+              <Settings className="w-4 h-4" />
+              Settings
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => navigate('/help')}
+              className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
+            >
+              <CircleHelp className="w-4 h-4" />
+              Help
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setAboutDialogOpen(true)}
+              className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
+            >
+              <Info className="w-4 h-4" />
+              About the Developer
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -535,11 +647,6 @@ const Chat = () => {
             >
               <Menu className="w-4 h-4" />
             </Button>
-            <Avatar className="w-8 h-8 avatar-glow">
-              <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white">
-                <Bot className="w-4 h-4" />
-              </AvatarFallback>
-            </Avatar>
             <div>
               <h1 className="text-lg font-semibold text-foreground">
                 {currentConversation?.title || 'Super AI'}
@@ -558,18 +665,6 @@ const Chat = () => {
               <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" title="Profile">
                 <User className="w-4 h-4 sm:mr-2" />
                 <span className="hidden sm:inline">Profile</span>
-              </Button>
-            </Link>
-            <Link to="/settings">
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" title="Settings">
-                <Settings className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Settings</span>
-              </Button>
-            </Link>
-            <Link to="/help">
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" title="Help">
-                <CircleHelp className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Help</span>
               </Button>
             </Link>
             <Button
@@ -801,6 +896,38 @@ const Chat = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Rename Dialog */}
+      <AlertDialog open={renameDialogOpen} onOpenChange={setRenameDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Rename Chat</AlertDialogTitle>
+            <AlertDialogDescription>
+              Give this conversation a new name.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            value={renameTitle}
+            onChange={(e) => setRenameTitle(e.target.value)}
+            placeholder="Conversation title"
+            className="w-full"
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                confirmRename();
+              }
+            }}
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={cancelRename}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmRename}>Rename</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* About Developer Dialog */}
+      <AboutDeveloper open={aboutDialogOpen} onOpenChange={setAboutDialogOpen} />
     </div>
   );
 };

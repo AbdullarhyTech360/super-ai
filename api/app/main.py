@@ -14,7 +14,7 @@ from app.db.session import get_session
 from app.db.database import create_db_and_tables
 from app.models.user import User
 from app.models.forms import SignUp, Login
-from app.schemas.conversation_role import Chat_role
+from app.schemas.conversation_role import Chat_role, Rename_request
 from app.services.conversation_ai import send_message_stream, send_message_stream_with_title
 
 import os
@@ -264,3 +264,26 @@ def delete_conversation(
     session.delete(conversation)
     session.commit()
     return {"message": "Conversation was deleted successfully."}
+
+@app.put("/api/conversations/{conversation_id}")
+def rename_conversation(
+    conversation_id: str,
+    rename_request: Rename_request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    from app.models.chat import Conversation
+
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None or conversation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    new_title = " ".join(rename_request.title.split())[:50].strip()
+    if not new_title:
+        raise HTTPException(status_code=400, detail="Title cannot be empty")
+
+    conversation.title = new_title
+    conversation.updated_at = datetime.now(timezone.utc)
+    session.add(conversation)
+    session.commit()
+    return {"message": "Conversation was renamed successfully.", "title": new_title}
