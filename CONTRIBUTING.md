@@ -77,6 +77,17 @@ Thank you for contributing to our projects! This guide outlines our internal wor
   git pull origin main --rebase
   ```
 
+- **Delete Your Branch After Pushing:**\
+  Once a branch has been pushed, delete its local copy to keep your workspace tidy. Keep the remote branch until the work has been merged, then delete it as well:
+
+  ```bash
+  # After pushing, remove the local copy
+  git branch -d <branch-name>
+
+  # After the pull request is merged, remove the remote branch
+  git push origin --delete <branch-name>
+  ```
+
 ### Commit Standards
 
 - **Commit Message Format:**\
