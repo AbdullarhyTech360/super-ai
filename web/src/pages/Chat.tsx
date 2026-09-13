@@ -1,28 +1,22 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Send, Plus, Search, X, Paperclip, Mic, MicOff, User, Settings, CircleHelp, LogOut, ListFilter, Pencil, Info, SquarePen, PanelLeftClose, PanelLeftOpen, Copy, Check, Moon, Sun, Monitor, Palette, ChevronDown } from 'lucide-react';
+import { Send, Plus, Search, X, Paperclip, Mic, MicOff, Pencil, Copy, Check, ListFilter, SquarePen } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { useTheme } from '@/hooks/useTheme';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Separator } from '@/components/ui/separator';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { 
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -36,8 +30,8 @@ import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import MarkdownMessage from '@/components/MarkdownMessage';
-import AboutDeveloper from '@/components/AboutDeveloper';
 import AppLogo from '@/components/AppLogo';
+import SidebarShell from '@/components/SidebarShell';
 import { CHAT_THEMES, getChatTheme, type ChatTheme } from '@/lib/chatThemes';
 
 interface Message {
@@ -72,6 +66,19 @@ interface ConversationDto {
 
 type ConversationSort = 'last-used' | 'name' | 'created';
 
+const suggestionPrompts = [
+  'Help me brainstorm creative ideas',
+  'Explain complex topics simply',
+  'Write and edit content professionally',
+];
+
+const getGreeting = () => {
+  const hour = new Date().getHours();
+  if (hour < 12) return 'Good morning';
+  if (hour < 17) return 'Good afternoon';
+  return 'Good evening';
+};
+
 const Chat = () => {
   const activeConversationStorageKey = 'active_conversation_id';
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -83,18 +90,15 @@ const Chat = () => {
   const [isTyping, setIsTyping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
-  const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [conversationToRename, setConversationToRename] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
-  const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
-  const [userInfo, setUserInfo] = useState<{ full_name: string; email: string } | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitle, setEditingTitle] = useState('');
+  const [userInfo, setUserInfo] = useState<{ full_name: string; email: string } | null>(null);
   const [chatTheme, setChatTheme] = useState<ChatTheme>(
     () => getChatTheme(localStorage.getItem('chatTheme'))
   );
@@ -105,29 +109,13 @@ const Chat = () => {
   const streamMessageIdRef = useRef<string | null>(null);
   const streamDoneRef = useRef(false);
   const streamRevealTimerRef = useRef<number | null>(null);
-  const navigate = useNavigate();
-  const { logout, authenticatedFetch } = useAuth();
+  const { authenticatedFetch } = useAuth();
   const { toast } = useToast();
-  const { theme, setTheme } = useTheme();
-  const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  const handleThemeChange = (checked: boolean) => setTheme(checked ? 'dark' : 'light');
 
   const handleChatThemeChange = (id: string) => {
     const next = getChatTheme(id);
     setChatTheme(next);
     localStorage.setItem('chatTheme', next.id);
-  };
-  const userInitials = (userInfo?.full_name ?? 'User')
-    .split(' ')
-    .filter(Boolean)
-    .map(part => part[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
-
-  const handleLogout = () => {
-    logout();
-    navigate('/');
   };
 
   const handleCopyMessage = useCallback(async (messageId: string, text: string) => {
@@ -154,14 +142,6 @@ const Chat = () => {
       textareaRef.current?.focus();
     });
   };
-
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 768);
-    };
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
 
   useEffect(() => {
     if (textareaRef.current) {
@@ -263,7 +243,7 @@ const Chat = () => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
     const messageDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    
+
     if (messageDate.getTime() === today.getTime()) {
       return 'Today';
     } else if (messageDate.getTime() === today.getTime() - 24 * 60 * 60 * 1000) {
@@ -273,7 +253,7 @@ const Chat = () => {
     }
   };
 
-  const handleDeleteClick = (id: string, title: string) => {
+  const handleDeleteClick = (id: string) => {
     setConversationToDelete(id);
     setDeleteDialogOpen(true);
   };
@@ -413,21 +393,22 @@ const Chat = () => {
     }, 45);
   };
 
-  const handleSendMessage = useCallback(() => {
-    if (!newMessage.trim()) return;
+  const handleSendMessage = useCallback((overrideText?: string) => {
+    const text = (overrideText ?? newMessage).trim();
+    if (!text) return;
 
     const localConversationId = activeConversation ?? Date.now().toString();
-    
+
     const message: Message = {
       id: Date.now().toString(),
-      text: newMessage,
+      text,
       sender: 'user',
       timestamp: new Date()
     };
 
     if (activeConversation) {
-      setConversations(prev => prev.map(conv => 
-        conv.id === activeConversation 
+      setConversations(prev => prev.map(conv =>
+        conv.id === activeConversation
           ? { ...conv, messages: [...conv.messages, message], updatedAt: new Date() }
           : conv
       ));
@@ -445,7 +426,7 @@ const Chat = () => {
 
     setNewMessage('');
     setIsTyping(true);
-    
+
     // use an api call to get the AI response instead of a simulated response
     (async () => {
       let responseConversationId = activeConversation ?? localConversationId;
@@ -463,7 +444,7 @@ const Chat = () => {
             'Authorization': `Bearer ${accessToken}`,
           },
           body: JSON.stringify({
-            input: message.text,
+            input: text,
             conversation_id: activeConversation,
             is_new: !activeConversation, // If there's no active conversation, it's a new one
           }),
@@ -554,6 +535,7 @@ const Chat = () => {
 
   const currentConversation = conversations.find(conv => conv.id === activeConversation);
   const currentTitle = currentConversation?.title || 'Super AI';
+  const firstName = (userInfo?.full_name ?? '').split(' ')[0] || 'there';
   const filteredConversations = conversations
     .filter(conv => conv.title.toLowerCase().includes(searchTerm.toLowerCase()))
     .sort((first, second) => {
@@ -567,626 +549,382 @@ const Chat = () => {
     });
 
   return (
-    <div className="h-screen flex bg-background overflow-hidden w-full">
-      {/* Mobile overlay */}
-      {isSidebarOpen && isMobile && (
-        <div 
-          className="fixed inset-0 bg-background/80 backdrop-blur-sm z-40"
-          onClick={() => setIsSidebarOpen(false)}
-        />
-      )}
+    <SidebarShell
+      scrollable={false}
+      subtitle="Always here to help"
+      hideProfileNav
+      themeLabel={chatTheme.id === 'default' ? 'Default' : chatTheme.label}
+      title={
+        isEditingTitle && currentConversation ? (
+          <Input
+            value={editingTitle}
+            onChange={(e) => setEditingTitle(e.target.value)}
+            onBlur={saveTitleEdit}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                saveTitleEdit();
+              } else if (e.key === 'Escape') {
+                cancelTitleEdit();
+              }
+            }}
+            autoFocus
+            onFocus={(e) => e.target.select()}
+            aria-label="Edit conversation title"
+            className="h-7 w-full max-w-xs px-2 py-0 text-lg font-semibold text-foreground bg-card border-border"
+          />
+        ) : (
+          <button
+            type="button"
+            onClick={startEditingTitle}
+            disabled={!currentConversation}
+            className="flex items-center gap-1.5 group/title max-w-full"
+            title={currentConversation ? 'Click to rename' : undefined}
+            aria-label={currentConversation ? 'Rename conversation' : undefined}
+          >
+            <h1 className="text-lg font-semibold text-foreground truncate max-w-[50vw]">
+              {currentTitle}
+            </h1>
+            {currentConversation && (
+              <Pencil className="w-3.5 h-3.5 text-muted-foreground/0 group-hover/title:text-muted-foreground transition-colors flex-shrink-0" />
+            )}
+          </button>
+        )
+      }
+      sidebarHeaderExtra={
+        <>
+          <Button
+            onClick={handleNewChat}
+            className="w-full mb-4 smooth-transition hover:shadow-glow"
+            style={{ background: 'var(--gradient-primary)' }}
+          >
+            <Plus className="w-4 h-4 mr-2" />
+            New Chat
+          </Button>
 
-      {/* Sidebar */}
-      <div className={cn(
-        "fixed inset-y-0 left-0 z-50 bg-card/95 backdrop-blur-md border-r border-border transition-all duration-300 ease-in-out shadow-elegant",
-        isSidebarOpen ? "w-80" : "w-16"
-      )}>
-        {/* Expanded sidebar */}
-        <div className={cn(
-          "absolute inset-0 flex flex-col overflow-hidden",
-          !isSidebarOpen && "hidden"
-        )}>
-          {/* Sidebar Header */}
-          <div className="p-4 border-b border-border bg-gradient-hover">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <AppLogo size={26} />
-                <h2 className="text-lg font-semibold gradient-text">Super AI</h2>
-              </div>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsSidebarOpen(false)}
-                    className="h-8 w-8 p-0 text-muted-foreground hover:bg-hover-accent hover:text-foreground fast-transition"
-                    aria-label="Collapse sidebar"
-                  >
-                    <PanelLeftClose className="w-4 h-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent side="right">Collapse sidebar</TooltipContent>
-              </Tooltip>
-            </div>
-            <Separator className="my-3" />
-            
-            <Button 
-              onClick={handleNewChat}
-              className="w-full mb-4 smooth-transition hover:shadow-glow"
-              style={{ background: 'var(--gradient-primary)' }}
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              New Chat
-            </Button>
-            
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
-              <Input
-                placeholder="Search conversations..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 bg-muted/30 border-border fast-transition focus:shadow-glow"
-              />
-            </div>
-
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="sm" className="w-full mt-2 justify-start gap-2 text-muted-foreground hover:text-foreground">
-                  <ListFilter className="w-4 h-4" />
-                  Sort: {conversationSort === 'last-used' ? 'Last used' : conversationSort === 'name' ? 'Name' : 'Created'}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-64">
-                <DropdownMenuLabel>Arrange conversations</DropdownMenuLabel>
-                <DropdownMenuRadioGroup
-                  value={conversationSort}
-                  onValueChange={(value) => setConversationSort(value as ConversationSort)}
-                >
-                  <DropdownMenuRadioItem value="last-used">Last used</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
-                  <DropdownMenuRadioItem value="created">Time created</DropdownMenuRadioItem>
-                </DropdownMenuRadioGroup>
-              </DropdownMenuContent>
-            </DropdownMenu>
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
+            <Input
+              placeholder="Search conversations..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="pl-10 bg-muted/30 border-border fast-transition focus:shadow-glow"
+            />
           </div>
 
-          {/* Conversation List */}
-          <ScrollArea className="flex-1 p-4">
-            <div className="space-y-2">
-              {filteredConversations.map((conversation) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="sm" className="w-full mt-2 justify-start gap-2 text-muted-foreground hover:text-foreground">
+                <ListFilter className="w-4 h-4" />
+                Sort: {conversationSort === 'last-used' ? 'Last used' : conversationSort === 'name' ? 'Name' : 'Created'}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel>Arrange conversations</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={conversationSort}
+                onValueChange={(value) => setConversationSort(value as ConversationSort)}
+              >
+                <DropdownMenuRadioItem value="last-used">Last used</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="created">Time created</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </>
+      }
+      sidebarContent={
+        <div className="space-y-2">
+          {filteredConversations.map((conversation) => (
+            <div
+              key={conversation.id}
+              onClick={() => setActiveConversation(conversation.id)}
+              className={cn(
+                "p-3 rounded-lg cursor-pointer transition-all duration-200 group hover:shadow-modern smooth-transition",
+                activeConversation === conversation.id
+                  ? "bg-accent text-accent-foreground shadow-modern border border-border/50"
+                  : "hover:bg-hover-muted text-foreground"
+              )}
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-medium text-sm truncate">{conversation.title}</h3>
+                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleRenameClick(conversation.id, conversation.title);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                      title="Rename chat"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDeleteClick(conversation.id);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                      title="Delete chat"
+                    >
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {formatDate(conversation.updatedAt)}
+                </p>
+              </div>
+            </div>
+          ))}
+        </div>
+      }
+      sidebarRailContent={
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleNewChat}
+              className="h-9 w-9 p-0 rounded-lg text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition mt-1"
+              aria-label="New chat"
+            >
+              <SquarePen className="w-4 h-4" />
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="right">New chat</TooltipContent>
+        </Tooltip>
+      }
+      themeExtras={
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Chat theme</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="w-56">
+            <DropdownMenuRadioGroup
+              value={chatTheme.id}
+              onValueChange={handleChatThemeChange}
+            >
+              {CHAT_THEMES.map((sel) => (
+                <DropdownMenuRadioItem key={sel.id} value={sel.id}>
+                  <span className="flex -space-x-1 mr-2">
+                    <span
+                      className="w-4 h-4 rounded-full border border-border/40"
+                      style={{ background: sel.swatchUser }}
+                    />
+                    <span
+                      className="w-4 h-4 rounded-full border border-border/40"
+                      style={{ background: sel.swatchAi }}
+                    />
+                  </span>
+                  {sel.label}
+                </DropdownMenuRadioItem>
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      }
+    >
+      {/* Messages Area */}
+      <div
+        className="relative flex-1 min-h-0 overflow-hidden"
+        style={{ background: chatTheme.areaBg }}
+      >
+        <ScrollArea className="h-full p-4 bg-transparent overflow-x-hidden">
+        {currentConversation?.messages.length ? (
+          <div className="max-w-4xl mx-auto w-full">
+            {currentConversation.messages.map((message, index) => {
+              const showHeader = index === 0 || currentConversation.messages[index - 1].sender !== message.sender;
+
+              return (
                 <div
-                  key={conversation.id}
-                  onClick={() => setActiveConversation(conversation.id)}
+                  key={message.id}
                   className={cn(
-                    "p-3 rounded-lg cursor-pointer transition-all duration-200 group hover:shadow-modern smooth-transition",
-                    activeConversation === conversation.id 
-                      ? "bg-accent text-accent-foreground shadow-modern border border-border/50" 
-                      : "hover:bg-hover-muted text-foreground"
+                    "message-enter w-full group",
+                    showHeader ? "mt-6" : "mt-1.5",
+                    index === 0 && "mt-0"
                   )}
->
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between">
-                        <h3 className="font-medium text-sm truncate">{conversation.title}</h3>
-                        <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleRenameClick(conversation.id, conversation.title);
-                            }}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
-                            title="Rename chat"
-                          >
-                            <Pencil className="w-3 h-3" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteClick(conversation.id, conversation.title);
-                            }}
-                            className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
-                            title="Delete chat"
-                          >
-                            <X className="w-3 h-3" />
-                          </Button>
-                        </div>
+                >
+                  <div className={cn(
+                    "max-w-[80%] md:max-w-[70%] w-fit min-w-0",
+                    message.sender === 'user' ? "ml-auto" : "mr-auto"
+                  )}>
+                    {showHeader && (
+                      <div className={cn(
+                        "mb-1.5 text-xs",
+                        message.sender === 'user' ? "text-right" : "text-left"
+                      )}>
+                        <span className={cn(
+                          "font-semibold",
+                          message.sender === 'user' ? "text-foreground" : "text-muted-foreground"
+                        )}>
+                          {message.sender === 'user' ? 'You' : 'Super AI'}
+                        </span>
+                        <span className="text-muted-foreground">{' · '}
+                          {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {formatDate(conversation.updatedAt)}
-                      </p>
+                    )}
+                    <div
+                      className={cn(
+                        "px-4 py-3 rounded-2xl relative border min-w-0",
+                        message.sender === 'user'
+                          ? "rounded-tr-md"
+                          : "rounded-tl-md"
+                      )}
+                      style={{
+                        background: message.sender === 'user' ? chatTheme.userBg : chatTheme.aiBg,
+                        borderColor: message.sender === 'user' ? chatTheme.userBorder : chatTheme.aiBorder,
+                        color: message.sender === 'user' ? chatTheme.userText : chatTheme.aiText,
+                      }}
+                    >
+                      {message.sender === 'ai' ? (
+                        <MarkdownMessage content={message.text} />
+                      ) : (
+                        <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                          {message.text}
+                        </p>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleCopyMessage(message.id, message.text)}
+                        className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
+                        aria-label="Copy message"
+                        title="Copy message"
+                      >
+                        {copiedMessageId === message.id ? (
+                          <Check className="w-3.5 h-3.5" />
+                        ) : (
+                          <Copy className="w-3.5 h-3.5" />
+                        )}
+                      </Button>
                     </div>
                   </div>
-              ))}
-            </div>
-          </ScrollArea>
+                </div>
+              );
+            })}
 
-          {/* Sidebar Footer */}
-          <div className="border-t border-border p-3 space-y-1 shrink-0">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
+            {/* Typing Indicator */}
+            {isTyping && (
+              <div className="max-w-[80%] md:max-w-[70%] w-fit min-w-0 mr-auto animate-slide-in mt-6">
+                <div className="mb-1.5 text-xs text-left">
+                  <span className="font-semibold text-muted-foreground">Super AI</span>
+                  <span className="text-muted-foreground">{' · '}typing</span>
+                </div>
+                <div
+                  className="px-4 py-3 rounded-2xl rounded-tl-md border"
+                  style={{ background: chatTheme.aiBg, borderColor: chatTheme.aiBorder }}
                 >
-                  <Palette className="w-4 h-4" />
-                  Theme
-                  <span className="ml-auto text-xs font-medium">
-                    {chatTheme.id === 'default' ? 'Default' : chatTheme.label}
-                  </span>
-                  <ChevronDown className="w-4 h-4 text-muted-foreground/70" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-60">
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Chat theme</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-56">
-                    <DropdownMenuRadioGroup
-                      value={chatTheme.id}
-                      onValueChange={handleChatThemeChange}
-                    >
-                      {CHAT_THEMES.map((sel) => (
-                        <DropdownMenuRadioItem key={sel.id} value={sel.id}>
-                          <span className="flex -space-x-1 mr-2">
-                            <span
-                              className="w-4 h-4 rounded-full border border-border/40"
-                              style={{ background: sel.swatchUser }}
-                            />
-                            <span
-                              className="w-4 h-4 rounded-full border border-border/40"
-                              style={{ background: sel.swatchAi }}
-                            />
-                          </span>
-                          {sel.label}
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Mode</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-44">
-                    <DropdownMenuRadioGroup
-                      value={theme}
-                      onValueChange={(value) => setTheme(value as 'dark' | 'light' | 'system')}
-                    >
-                      <DropdownMenuRadioItem value="light">
-                        <Sun className="w-4 h-4 mr-2" />
-                        Light
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="dark">
-                        <Moon className="w-4 h-4 mr-2" />
-                        Dark
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="system">
-                        <Monitor className="w-4 h-4 mr-2" />
-                        System
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <Separator />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate('/settings')}
-              className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
-            >
-              <Settings className="w-4 h-4" />
-              Settings
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => navigate('/help')}
-              className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
-            >
-              <CircleHelp className="w-4 h-4" />
-              Help
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setAboutDialogOpen(true)}
-              className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
-            >
-              <Info className="w-4 h-4" />
-              About the Developer
-            </Button>
+                  <div className="flex items-center gap-1">
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div ref={messagesEndRef} />
           </div>
-        </div>
-              
-        {/* Collapsed sidebar (icon rail) */}
-        <div className={cn(
-          "absolute inset-0 flex flex-col items-center py-4",
-          isSidebarOpen && "hidden"
-        )}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsSidebarOpen(true)}
-                className="h-9 w-9 p-0 text-muted-foreground hover:bg-hover-accent hover:text-foreground fast-transition"
-                aria-label="Expand sidebar"
-              >
-                <PanelLeftOpen className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">Expand sidebar</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleNewChat}
-                className="h-9 w-9 p-0 rounded-lg text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition mt-1"
-                aria-label="New chat"
-              >
-                <SquarePen className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">New chat</TooltipContent>
-          </Tooltip>
-
-          <div className="flex-1" />
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleThemeChange(!isDark)}
-                className="h-9 w-9 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
-                aria-label="Toggle dark mode"
-              >
-                {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">{isDark ? 'Light mode' : 'Dark mode'}</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate('/settings')}
-                className="h-9 w-9 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
-                aria-label="Settings"
-              >
-                <Settings className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">Settings</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => navigate('/help')}
-                className="h-9 w-9 p-0 mt-1 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
-                aria-label="Help"
-              >
-                <CircleHelp className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">Help</TooltipContent>
-          </Tooltip>
-
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setAboutDialogOpen(true)}
-                className="h-9 w-9 p-0 mt-1 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
-                aria-label="About the Developer"
-              >
-                <Info className="w-4 h-4" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent side="right">About the Developer</TooltipContent>
-          </Tooltip>
-        </div>
+        ) : (
+          <div className="flex items-center justify-center h-full">
+            <div className="text-center max-w-md mx-auto p-8">
+              <div className="mb-8">
+                <AppLogo size={96} className="mx-auto mb-6 animate-bounce" />
+              </div>
+              <h2 className="text-4xl font-bold gradient-text mb-4">
+                {getGreeting()}, {firstName}!
+              </h2>
+              <p className="text-muted-foreground mb-8 text-lg">
+                What's on your mind today?
+              </p>
+              <div className="grid grid-cols-1 gap-4 text-sm">
+                {suggestionPrompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => handleSendMessage(prompt)}
+                    disabled={isTyping}
+                    className="p-4 rounded-xl bg-card/50 backdrop-blur-sm hover:bg-card/80 cursor-pointer smooth-transition hover:shadow-modern border border-border/50 text-foreground disabled:opacity-50 disabled:cursor-not-allowed text-left"
+                  >
+                    &ldquo;{prompt}&rdquo;
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </ScrollArea>
       </div>
 
-      {/* Main Chat Area */}
-      <div className={cn(
-        "flex flex-col h-screen flex-1 min-w-0 transition-all duration-300 ease-in-out overflow-hidden",
-        isMobile ? "ml-0" : isSidebarOpen ? "lg:ml-80" : "lg:ml-16"
-      )}>
-        {/* Header */}
-        <div className="bg-background/95 backdrop-blur-md border-b border-border px-4 py-2.5 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            {isEditingTitle && currentConversation ? (
-              <Input
-                value={editingTitle}
-                onChange={(e) => setEditingTitle(e.target.value)}
-                onBlur={saveTitleEdit}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    saveTitleEdit();
-                  } else if (e.key === 'Escape') {
-                    cancelTitleEdit();
-                  }
-                }}
-                autoFocus
-                onFocus={(e) => e.target.select()}
-                aria-label="Edit conversation title"
-                className="h-7 w-full max-w-xs px-2 py-0 text-lg font-semibold text-foreground bg-card border-border"
+      {/* Input Area */}
+      <div className="p-4 border-t border-border bg-background/95 backdrop-blur-md shadow-elegant">
+        <div className="max-w-4xl mx-auto w-full">
+          <div className="flex items-end gap-2 p-2 bg-card/50 backdrop-blur-sm rounded-2xl border border-border shadow-modern hover:shadow-elegant smooth-transition w-full">
+            <div className="relative flex-1 min-w-0">
+              <Textarea
+                ref={textareaRef}
+                placeholder="Message Super AI... (Enter to send, Shift+Enter for new line)"
+                value={newMessage}
+                onChange={(e) => setNewMessage(e.target.value)}
+                onKeyPress={handleKeyPress}
+                aria-label="Message Super AI"
+                className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                rows={1}
               />
-            ) : (
-              <button
+
+              <Button
                 type="button"
-                onClick={startEditingTitle}
-                disabled={!currentConversation}
-                className="flex items-center gap-1.5 group/title max-w-full"
-                title={currentConversation ? 'Click to rename' : undefined}
-                aria-label={currentConversation ? 'Rename conversation' : undefined}
+                variant="ghost"
+                size="sm"
+                className="absolute bottom-2 left-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                aria-label="Attach a file"
+                title="Attach a file"
               >
-                <h1 className="text-lg font-semibold text-foreground truncate max-w-[50vw]">
-                  {currentTitle}
-                </h1>
-                {currentConversation && (
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground/0 group-hover/title:text-muted-foreground transition-colors flex-shrink-0" />
-                )}
-              </button>
-            )}
-            <p className="text-xs text-muted-foreground">Always here to help</p>
-          </div>
-          <nav className="flex items-center flex-shrink-0 gap-1" aria-label="Account">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 p-0 rounded-full"
-                  title="Account"
-                  aria-label="Account"
-                >
-                  <Avatar className="h-8 w-8">
-                    <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-xs font-semibold">
-                      {userInitials}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-64">
-                <div className="px-2 py-2 flex items-center gap-3">
-                  <Avatar className="h-10 w-10">
-                    <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-sm font-semibold">
-                      {userInitials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{userInfo?.full_name || 'User'}</p>
-                    <p className="text-xs text-muted-foreground truncate">{userInfo?.email || '—'}</p>
-                  </div>
-                </div>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={() => navigate('/profile')}>
-                  <User className="w-4 h-4 mr-2" />
-                  View profile
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={handleLogout}
-                  className="text-destructive focus:text-destructive"
-                >
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </nav>
-        </div>
+                <Paperclip className="w-4 h-4" />
+              </Button>
 
-        {/* Messages Area */}
-        <div
-          className="relative flex-1 min-h-0 overflow-hidden"
-          style={{ background: chatTheme.areaBg }}
-        >
-          <ScrollArea className="h-full p-4 bg-transparent overflow-x-hidden">
-          {currentConversation?.messages.length ? (
-            <div className="max-w-4xl mx-auto w-full">
-              {currentConversation.messages.map((message, index) => {
-                const showHeader = index === 0 || currentConversation.messages[index - 1].sender !== message.sender;
-                
-                return (
-                  <div
-                    key={message.id}
-                    className={cn(
-                      "message-enter w-full group",
-                      showHeader ? "mt-6" : "mt-1.5",
-                      index === 0 && "mt-0"
-                    )}
-                  >
-                    <div className={cn(
-                      "max-w-[80%] md:max-w-[70%] w-fit min-w-0",
-                      message.sender === 'user' ? "ml-auto" : "mr-auto"
-                    )}>
-                      {showHeader && (
-                        <div className={cn(
-                          "mb-1.5 text-xs",
-                          message.sender === 'user' ? "text-right" : "text-left"
-                        )}>
-                          <span className={cn(
-                            "font-semibold",
-                            message.sender === 'user' ? "text-foreground" : "text-muted-foreground"
-                          )}>
-                            {message.sender === 'user' ? 'You' : 'Super AI'}
-                          </span>
-                          <span className="text-muted-foreground">{' · '}
-                            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </span>
-                        </div>
-                      )}
-                      <div
-                        className={cn(
-                          "px-4 py-3 rounded-2xl relative border min-w-0",
-                          message.sender === 'user'
-                            ? "rounded-tr-md"
-                            : "rounded-tl-md"
-                        )}
-                        style={{
-                          background: message.sender === 'user' ? chatTheme.userBg : chatTheme.aiBg,
-                          borderColor: message.sender === 'user' ? chatTheme.userBorder : chatTheme.aiBorder,
-                          color: message.sender === 'user' ? chatTheme.userText : chatTheme.aiText,
-                        }}
-                      >
-                        {message.sender === 'ai' ? (
-                          <MarkdownMessage content={message.text} />
-                        ) : (
-                          <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
-                            {message.text}
-                          </p>
-                        )}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleCopyMessage(message.id, message.text)}
-                          className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
-                          aria-label="Copy message"
-                          title="Copy message"
-                        >
-                          {copiedMessageId === message.id ? (
-                            <Check className="w-3.5 h-3.5" />
-                          ) : (
-                            <Copy className="w-3.5 h-3.5" />
-                          )}
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-              
-              {/* Typing Indicator */}
-              {isTyping && (
-                <div className="max-w-[80%] md:max-w-[70%] w-fit min-w-0 mr-auto animate-slide-in mt-6">
-                  <div className="mb-1.5 text-xs text-left">
-                    <span className="font-semibold text-muted-foreground">Super AI</span>
-                    <span className="text-muted-foreground">{' · '}typing</span>
-                  </div>
-                  <div
-                    className="px-4 py-3 rounded-2xl rounded-tl-md border"
-                    style={{ background: chatTheme.aiBg, borderColor: chatTheme.aiBorder }}
-                  >
-                    <div className="flex items-center gap-1">
-                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                    </div>
-                  </div>
-                </div>
-              )}
-              
-              <div ref={messagesEndRef} />
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center max-w-md mx-auto p-8">
-                <div className="mb-8">
-                  <AppLogo size={96} className="mx-auto mb-6 animate-bounce" />
-                </div>
-                <h2 className="text-4xl font-bold gradient-text mb-4">
-                  Welcome! 👋
-                </h2>
-                <p className="text-muted-foreground mb-8 text-lg">
-                  What's on your mind today?
-                </p>
-                <div className="grid grid-cols-1 gap-4 text-sm">
-                  <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm hover:bg-card/80 cursor-pointer smooth-transition hover:shadow-modern border border-border/50">
-                    "Help me brainstorm creative ideas"
-                  </div>
-                  <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm hover:bg-card/80 cursor-pointer smooth-transition hover:shadow-modern border border-border/50">
-                    "Explain complex topics simply"
-                  </div>
-                  <div className="p-4 rounded-xl bg-card/50 backdrop-blur-sm hover:bg-card/80 cursor-pointer smooth-transition hover:shadow-modern border border-border/50">
-                    "Write and edit content professionally"
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </ScrollArea>
-        </div>
-
-        {/* Input Area */}
-        <div className="p-4 border-t border-border bg-background/95 backdrop-blur-md shadow-elegant">
-          <div className="max-w-4xl mx-auto w-full">
-            <div className="flex items-end gap-2 p-2 bg-card/50 backdrop-blur-sm rounded-2xl border border-border shadow-modern hover:shadow-elegant smooth-transition w-full">
-              <div className="relative flex-1 min-w-0">
-                <Textarea
-                  ref={textareaRef}
-                  placeholder="Message Super AI... (Enter to send, Shift+Enter for new line)"
-                  value={newMessage}
-                  onChange={(e) => setNewMessage(e.target.value)}
-                  onKeyPress={handleKeyPress}
-                  aria-label="Message Super AI"
-                  className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-                  rows={1}
-                />
-
+              {!newMessage.trim() && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="absolute bottom-2 left-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
-                  aria-label="Attach a file"
-                  title="Attach a file"
+                  onClick={() => setIsVoiceRecording(!isVoiceRecording)}
+                  className={cn(
+                    "absolute bottom-2 right-2 z-10 h-8 w-8 p-0 transition-all duration-200",
+                    isVoiceRecording
+                      ? "text-destructive hover:text-destructive/80 animate-pulse"
+                      : "text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                  )}
+                  aria-label={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
+                  title={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
                 >
-                  <Paperclip className="w-4 h-4" />
+                  {isVoiceRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </Button>
+              )}
+            </div>
 
-                {!newMessage.trim() && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setIsVoiceRecording(!isVoiceRecording)}
-                    className={cn(
-                      "absolute bottom-2 right-2 z-10 h-8 w-8 p-0 transition-all duration-200",
-                      isVoiceRecording
-                        ? "text-destructive hover:text-destructive/80 animate-pulse"
-                        : "text-muted-foreground hover:bg-hover-muted hover:text-foreground"
-                    )}
-                    aria-label={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
-                    title={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
-                  >
-                    {isVoiceRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
-                  </Button>
-                )}
-              </div>
-              
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {newMessage.trim() && (
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={isTyping}
-                    size="sm"
-                    className="h-8 w-8 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
-                    style={{ background: 'var(--gradient-primary)' }}
-                  >
-                    <Send className="w-4 h-4" />
-                  </Button>
-                )}
-              </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {newMessage.trim() && (
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={isTyping}
+                  size="sm"
+                  className="h-8 w-8 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
+                  style={{ background: 'var(--gradient-primary)' }}
+                >
+                  <Send className="w-4 h-4" />
+                </Button>
+              )}
             </div>
-            
-            <div className="mt-2 text-xs text-muted-foreground text-center">
-              Enter to send · Shift+Enter for a new line
-            </div>
+          </div>
+
+          <div className="mt-2 text-xs text-muted-foreground text-center">
+            Enter to send · Shift+Enter for a new line
           </div>
         </div>
       </div>
@@ -1202,7 +940,7 @@ const Chat = () => {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={cancelDelete}>Cancel</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               onClick={confirmDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
@@ -1240,10 +978,7 @@ const Chat = () => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      {/* About Developer Dialog */}
-      <AboutDeveloper open={aboutDialogOpen} onOpenChange={setAboutDialogOpen} />
-    </div>
+    </SidebarShell>
   );
 };
 

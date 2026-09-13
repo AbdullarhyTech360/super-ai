@@ -10,7 +10,7 @@ import { Switch } from '@/components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import Navbar from '@/components/Navbar';
+import SidebarShell from '@/components/SidebarShell';
 import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import { useToast } from '@/hooks/use-toast';
@@ -107,34 +107,25 @@ const Settings = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background">
-        <Navbar />
-        <div className="pt-24 text-center text-muted-foreground">Loading settings...</div>
-      </div>
+      <SidebarShell title="Settings">
+        <div className="text-center text-muted-foreground py-12">Loading settings...</div>
+      </SidebarShell>
     );
   }
 
   if (loadError) {
     return (
-      <div className="min-h-screen bg-background">
-        <Navbar />
-        <div className="pt-24 text-center text-muted-foreground">{loadError}</div>
-      </div>
+      <SidebarShell title="Settings">
+        <div className="text-center text-muted-foreground py-12">{loadError}</div>
+      </SidebarShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Navbar />
-      
-      <div className="pt-20 pb-8 px-2 sm:px-4">
+    <SidebarShell title="Settings" subtitle="Manage your account and application preferences">
+      <div className="p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
-          <div className="mb-6 sm:mb-8 px-2">
-            <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">Settings</h1>
-            <p className="text-muted-foreground text-sm sm:text-base">Manage your account and application preferences</p>
-          </div>
-
-          <div className="grid gap-4 sm:gap-6 px-2">
+          <div className="grid gap-4 sm:gap-6">
             {/* Profile Settings */}
             <Card>
               <CardHeader>
@@ -321,7 +312,7 @@ const Settings = () => {
           </div>
         </div>
       </div>
-    </div>
+    </SidebarShell>
   );
 };
 

@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import Navbar from '@/components/Navbar';
+import SidebarShell from '@/components/SidebarShell';
 import { useAuth } from '@/hooks/useAuth';
 
 interface ProfileUser {
@@ -92,27 +92,23 @@ const Profile = () => {
 
   if (isLoading) {
     return (
-      <div className="min-h-screen bg-background">
-        <Navbar />
-        <div className="pt-24 text-center text-muted-foreground">Loading profile...</div>
-      </div>
+      <SidebarShell title="Profile">
+        <div className="text-center text-muted-foreground py-12">Loading profile...</div>
+      </SidebarShell>
     );
   }
 
   if (loadError || !user) {
     return (
-      <div className="min-h-screen bg-background">
-        <Navbar />
-        <div className="pt-24 text-center text-muted-foreground">{loadError || 'Profile unavailable.'}</div>
-      </div>
+      <SidebarShell title="Profile">
+        <div className="text-center text-muted-foreground py-12">{loadError || 'Profile unavailable.'}</div>
+      </SidebarShell>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <Navbar />
-      
-      <div className="pt-20 pb-8 px-2 sm:px-4">
+    <SidebarShell title="Profile" subtitle="Your profile and activity">
+      <div className="p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           {/* Profile Header */}
           <Card className="mb-6">
@@ -222,7 +218,7 @@ const Profile = () => {
           </div>
         </div>
       </div>
-    </div>
+    </SidebarShell>
   );
 };
 

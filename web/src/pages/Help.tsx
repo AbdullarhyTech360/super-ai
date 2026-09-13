@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Badge } from '@/components/ui/badge';
-import Navbar from '@/components/Navbar';
+import SidebarShell from '@/components/SidebarShell';
 
 const Help = () => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -81,10 +81,8 @@ const Help = () => {
   );
 
   return (
-    <div className="min-h-screen bg-background">
-      <Navbar />
-      
-      <div className="pt-20 pb-8 px-2 sm:px-4">
+    <SidebarShell title="Help" subtitle="Find answers and contact support">
+      <div className="p-4 sm:p-6">
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <div className="text-center mb-8">
@@ -230,7 +228,7 @@ const Help = () => {
           </div>
         </div>
       </div>
-    </div>
+    </SidebarShell>
   );
 };
 
