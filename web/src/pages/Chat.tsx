@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Send, Plus, Search, Menu, X, Paperclip, Mic, MicOff, Bot, User, Settings, CircleHelp, LogOut, ListFilter, Pencil, Info } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { Send, Plus, Search, X, Paperclip, Mic, MicOff, User, Settings, CircleHelp, LogOut, ListFilter, Pencil, Info, SquarePen, PanelLeftClose, PanelLeftOpen, Copy, Check, Moon, Sun, Monitor, Palette, ChevronDown } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
+import { useTheme } from '@/hooks/useTheme';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -10,9 +12,14 @@ import { Separator } from '@/components/ui/separator';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { 
@@ -30,6 +37,8 @@ import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import MarkdownMessage from '@/components/MarkdownMessage';
 import AboutDeveloper from '@/components/AboutDeveloper';
+import AppLogo from '@/components/AppLogo';
+import { CHAT_THEMES, getChatTheme, type ChatTheme } from '@/lib/chatThemes';
 
 interface Message {
   id: string;
@@ -82,6 +91,13 @@ const Chat = () => {
   const [conversationToRename, setConversationToRename] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
+  const [userInfo, setUserInfo] = useState<{ full_name: string; email: string } | null>(null);
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitle, setEditingTitle] = useState('');
+  const [chatTheme, setChatTheme] = useState<ChatTheme>(
+    () => getChatTheme(localStorage.getItem('chatTheme'))
+  );
   const isInitialActiveConversation = useRef(true);
   const streamQueueRef = useRef<string[]>([]);
   const streamDisplayTextRef = useRef('');
@@ -92,11 +108,44 @@ const Chat = () => {
   const navigate = useNavigate();
   const { logout, authenticatedFetch } = useAuth();
   const { toast } = useToast();
+  const { theme, setTheme } = useTheme();
+  const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const handleThemeChange = (checked: boolean) => setTheme(checked ? 'dark' : 'light');
+
+  const handleChatThemeChange = (id: string) => {
+    const next = getChatTheme(id);
+    setChatTheme(next);
+    localStorage.setItem('chatTheme', next.id);
+  };
+  const userInitials = (userInfo?.full_name ?? 'User')
+    .split(' ')
+    .filter(Boolean)
+    .map(part => part[0])
+    .join('')
+    .slice(0, 2)
+    .toUpperCase();
 
   const handleLogout = () => {
     logout();
     navigate('/');
   };
+
+  const handleCopyMessage = useCallback(async (messageId: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedMessageId(messageId);
+      window.setTimeout(() => setCopiedMessageId(null), 1500);
+      toast({
+        title: 'Message copied',
+        description: 'The message is ready to paste.',
+      });
+    } catch {
+      toast({
+        title: 'Copy failed',
+        description: 'Your browser did not allow clipboard access.',
+      });
+    }
+  }, [toast]);
 
   const handleNewChat = () => {
     setActiveConversation(null);
@@ -177,6 +226,27 @@ const Chat = () => {
   }, [authenticatedFetch]);
 
   useEffect(() => {
+    const fetchUserInfo = async () => {
+      try {
+        const response = await authenticatedFetch('http://localhost:8000/api/me', {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+          },
+        });
+        if (!response.ok) throw new Error('Failed to fetch user info');
+        const data = (await response.json()) as { full_name: string; email: string };
+        setUserInfo(data);
+      } catch (error) {
+        console.error('Error fetching user info:', error);
+      }
+    };
+
+    fetchUserInfo();
+  }, [authenticatedFetch]);
+
+  useEffect(() => {
     if (isInitialActiveConversation.current) {
       isInitialActiveConversation.current = false;
       return;
@@ -241,34 +311,55 @@ const Chat = () => {
     setRenameDialogOpen(true);
   };
 
+  const renameConversation = (id: string, newTitle: string) => {
+    const trimmedTitle = newTitle.trim();
+    if (!trimmedTitle) return;
+
+    authenticatedFetch(`http://localhost:8000/api/conversations/${id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+      },
+      body: JSON.stringify({ title: trimmedTitle }),
+    }).catch(error => console.error('Error renaming conversation:', error));
+    setConversations(prev => prev.map(conv =>
+      conv.id === id
+        ? { ...conv, title: trimmedTitle, updatedAt: new Date() }
+        : conv
+    ));
+    toast({
+      title: "Chat renamed",
+      description: `Conversation renamed to "${trimmedTitle}".`,
+    });
+  };
+
   const confirmRename = () => {
     if (conversationToRename) {
-      const trimmedTitle = renameTitle.trim();
-      if (!trimmedTitle) {
-        setRenameDialogOpen(false);
-        setConversationToRename(null);
-        return;
-      }
-      authenticatedFetch(`http://localhost:8000/api/conversations/${conversationToRename}`, {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        },
-        body: JSON.stringify({ title: trimmedTitle }),
-      }).catch(error => console.error('Error renaming conversation:', error));
-      setConversations(prev => prev.map(conv =>
-        conv.id === conversationToRename
-          ? { ...conv, title: trimmedTitle, updatedAt: new Date() }
-          : conv
-      ));
-      toast({
-        title: "Chat renamed",
-        description: `Conversation renamed to "${trimmedTitle}".`,
-      });
+      renameConversation(conversationToRename, renameTitle);
     }
     setRenameDialogOpen(false);
     setConversationToRename(null);
+  };
+
+  const startEditingTitle = () => {
+    if (!currentConversation) return;
+    setEditingTitle(currentConversation.title);
+    setIsEditingTitle(true);
+  };
+
+  const saveTitleEdit = () => {
+    if (!currentConversation) return;
+    const trimmedTitle = editingTitle.trim();
+    setIsEditingTitle(false);
+    if (trimmedTitle && trimmedTitle !== currentConversation.title) {
+      renameConversation(currentConversation.id, trimmedTitle);
+    }
+  };
+
+  const cancelTitleEdit = () => {
+    setIsEditingTitle(false);
+    setEditingTitle('');
   };
 
   const cancelRename = () => {
@@ -277,7 +368,7 @@ const Chat = () => {
   };
 
   const enqueueStreamText = (text: string) => {
-    streamQueueRef.current.push(...(text.match(/\S+\s*/g) ?? [text]));
+    streamQueueRef.current.push(...(text.match(/\s*\S+\s*/g) ?? [text]));
 
     if (streamRevealTimerRef.current) return;
 
@@ -462,6 +553,7 @@ const Chat = () => {
   }, [handleSendMessage]);
 
   const currentConversation = conversations.find(conv => conv.id === activeConversation);
+  const currentTitle = currentConversation?.title || 'Super AI';
   const filteredConversations = conversations
     .filter(conv => conv.title.toLowerCase().includes(searchTerm.toLowerCase()))
     .sort((first, second) => {
@@ -487,23 +579,36 @@ const Chat = () => {
       {/* Sidebar */}
       <div className={cn(
         "fixed inset-y-0 left-0 z-50 bg-card/95 backdrop-blur-md border-r border-border transition-all duration-300 ease-in-out shadow-elegant",
-        isSidebarOpen ? "w-80" : "w-0",
-        isMobile && !isSidebarOpen && "hidden"
+        isSidebarOpen ? "w-80" : "w-16"
       )}>
-        <div className={cn("flex flex-col h-full overflow-hidden", !isSidebarOpen && "opacity-0")}>
+        {/* Expanded sidebar */}
+        <div className={cn(
+          "absolute inset-0 flex flex-col overflow-hidden",
+          !isSidebarOpen && "hidden"
+        )}>
           {/* Sidebar Header */}
           <div className="p-4 border-b border-border bg-gradient-hover">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold gradient-text">Super AI</h2>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsSidebarOpen(false)}
-                className="text-foreground hover:bg-hover-accent lg:hidden fast-transition"
-              >
-                <X className="w-4 h-4" />
-              </Button>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <AppLogo size={26} />
+                <h2 className="text-lg font-semibold gradient-text">Super AI</h2>
+              </div>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsSidebarOpen(false)}
+                    className="h-8 w-8 p-0 text-muted-foreground hover:bg-hover-accent hover:text-foreground fast-transition"
+                    aria-label="Collapse sidebar"
+                  >
+                    <PanelLeftClose className="w-4 h-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="right">Collapse sidebar</TooltipContent>
+              </Tooltip>
             </div>
+            <Separator className="my-3" />
             
             <Button 
               onClick={handleNewChat}
@@ -600,6 +705,72 @@ const Chat = () => {
 
           {/* Sidebar Footer */}
           <div className="border-t border-border p-3 space-y-1 shrink-0">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground fast-transition"
+                >
+                  <Palette className="w-4 h-4" />
+                  Theme
+                  <span className="ml-auto text-xs font-medium">
+                    {chatTheme.id === 'default' ? 'Default' : chatTheme.label}
+                  </span>
+                  <ChevronDown className="w-4 h-4 text-muted-foreground/70" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-60">
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Chat theme</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-56">
+                    <DropdownMenuRadioGroup
+                      value={chatTheme.id}
+                      onValueChange={handleChatThemeChange}
+                    >
+                      {CHAT_THEMES.map((sel) => (
+                        <DropdownMenuRadioItem key={sel.id} value={sel.id}>
+                          <span className="flex -space-x-1 mr-2">
+                            <span
+                              className="w-4 h-4 rounded-full border border-border/40"
+                              style={{ background: sel.swatchUser }}
+                            />
+                            <span
+                              className="w-4 h-4 rounded-full border border-border/40"
+                              style={{ background: sel.swatchAi }}
+                            />
+                          </span>
+                          {sel.label}
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+                <DropdownMenuSub>
+                  <DropdownMenuSubTrigger>Mode</DropdownMenuSubTrigger>
+                  <DropdownMenuSubContent className="w-44">
+                    <DropdownMenuRadioGroup
+                      value={theme}
+                      onValueChange={(value) => setTheme(value as 'dark' | 'light' | 'system')}
+                    >
+                      <DropdownMenuRadioItem value="light">
+                        <Sun className="w-4 h-4 mr-2" />
+                        Light
+                      </DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="dark">
+                        <Moon className="w-4 h-4 mr-2" />
+                        Dark
+                      </DropdownMenuRadioItem>
+                      <DropdownMenuRadioItem value="system">
+                        <Monitor className="w-4 h-4 mr-2" />
+                        System
+                      </DropdownMenuRadioItem>
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuSubContent>
+                </DropdownMenuSub>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Separator />
             <Button
               variant="ghost"
               size="sm"
@@ -629,97 +800,250 @@ const Chat = () => {
             </Button>
           </div>
         </div>
+              
+        {/* Collapsed sidebar (icon rail) */}
+        <div className={cn(
+          "absolute inset-0 flex flex-col items-center py-4",
+          isSidebarOpen && "hidden"
+        )}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsSidebarOpen(true)}
+                className="h-9 w-9 p-0 text-muted-foreground hover:bg-hover-accent hover:text-foreground fast-transition"
+                aria-label="Expand sidebar"
+              >
+                <PanelLeftOpen className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Expand sidebar</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleNewChat}
+                className="h-9 w-9 p-0 rounded-lg text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition mt-1"
+                aria-label="New chat"
+              >
+                <SquarePen className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">New chat</TooltipContent>
+          </Tooltip>
+
+          <div className="flex-1" />
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => handleThemeChange(!isDark)}
+                className="h-9 w-9 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
+                aria-label="Toggle dark mode"
+              >
+                {isDark ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{isDark ? 'Light mode' : 'Dark mode'}</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/settings')}
+                className="h-9 w-9 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
+                aria-label="Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Settings</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => navigate('/help')}
+                className="h-9 w-9 p-0 mt-1 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
+                aria-label="Help"
+              >
+                <CircleHelp className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">Help</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setAboutDialogOpen(true)}
+                className="h-9 w-9 p-0 mt-1 text-muted-foreground hover:bg-hover-muted hover:text-foreground fast-transition"
+                aria-label="About the Developer"
+              >
+                <Info className="w-4 h-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">About the Developer</TooltipContent>
+          </Tooltip>
+        </div>
       </div>
 
       {/* Main Chat Area */}
       <div className={cn(
         "flex flex-col h-screen flex-1 min-w-0 transition-all duration-300 ease-in-out overflow-hidden",
-        isSidebarOpen && !isMobile ? "lg:ml-80" : "ml-0"
+        isMobile ? "ml-0" : isSidebarOpen ? "lg:ml-80" : "lg:ml-16"
       )}>
         {/* Header */}
-        <div className="bg-background/95 backdrop-blur-md border-b border-border p-4 flex items-center justify-between shadow-elegant">
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="hover:bg-hover-accent fast-transition"
-            >
-              <Menu className="w-4 h-4" />
-            </Button>
-            <div>
-              <h1 className="text-lg font-semibold text-foreground">
-                {currentConversation?.title || 'Super AI'}
-              </h1>
-              <p className="text-xs text-muted-foreground">Always here to help</p>
-            </div>
+        <div className="bg-background/95 backdrop-blur-md border-b border-border px-4 py-2.5 flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            {isEditingTitle && currentConversation ? (
+              <Input
+                value={editingTitle}
+                onChange={(e) => setEditingTitle(e.target.value)}
+                onBlur={saveTitleEdit}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    saveTitleEdit();
+                  } else if (e.key === 'Escape') {
+                    cancelTitleEdit();
+                  }
+                }}
+                autoFocus
+                onFocus={(e) => e.target.select()}
+                aria-label="Edit conversation title"
+                className="h-7 w-full max-w-xs px-2 py-0 text-lg font-semibold text-foreground bg-card border-border"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={startEditingTitle}
+                disabled={!currentConversation}
+                className="flex items-center gap-1.5 group/title max-w-full"
+                title={currentConversation ? 'Click to rename' : undefined}
+                aria-label={currentConversation ? 'Rename conversation' : undefined}
+              >
+                <h1 className="text-lg font-semibold text-foreground truncate max-w-[50vw]">
+                  {currentTitle}
+                </h1>
+                {currentConversation && (
+                  <Pencil className="w-3.5 h-3.5 text-muted-foreground/0 group-hover/title:text-muted-foreground transition-colors flex-shrink-0" />
+                )}
+              </button>
+            )}
+            <p className="text-xs text-muted-foreground">Always here to help</p>
           </div>
-          <nav className="flex items-center gap-1" aria-label="Workspace navigation">
-            <Link to="/chat">
-              <Button variant="ghost" size="sm" className="text-primary" title="Chat">
-                <Bot className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Chat</span>
-              </Button>
-            </Link>
-            <Link to="/profile">
-              <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" title="Profile">
-                <User className="w-4 h-4 sm:mr-2" />
-                <span className="hidden sm:inline">Profile</span>
-              </Button>
-            </Link>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLogout}
-              className="text-muted-foreground hover:text-destructive"
-              title="Log out"
-            >
-              <LogOut className="w-4 h-4 sm:mr-2" />
-              <span className="hidden sm:inline">Logout</span>
-            </Button>
+          <nav className="flex items-center flex-shrink-0 gap-1" aria-label="Account">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 p-0 rounded-full"
+                  title="Account"
+                  aria-label="Account"
+                >
+                  <Avatar className="h-8 w-8">
+                    <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-xs font-semibold">
+                      {userInitials}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <div className="px-2 py-2 flex items-center gap-3">
+                  <Avatar className="h-10 w-10">
+                    <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-sm font-semibold">
+                      {userInitials}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-foreground truncate">{userInfo?.full_name || 'User'}</p>
+                    <p className="text-xs text-muted-foreground truncate">{userInfo?.email || '—'}</p>
+                  </div>
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => navigate('/profile')}>
+                  <User className="w-4 h-4 mr-2" />
+                  View profile
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={handleLogout}
+                  className="text-destructive focus:text-destructive"
+                >
+                  <LogOut className="w-4 h-4 mr-2" />
+                  Logout
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </nav>
         </div>
 
         {/* Messages Area */}
-        <ScrollArea className="flex-1 p-4 bg-background overflow-x-hidden">
+        <div
+          className="relative flex-1 min-h-0 overflow-hidden"
+          style={{ background: chatTheme.areaBg }}
+        >
+          <ScrollArea className="h-full p-4 bg-transparent overflow-x-hidden">
           {currentConversation?.messages.length ? (
-            <div className="max-w-4xl mx-auto space-y-4 w-full">
+            <div className="max-w-4xl mx-auto w-full">
               {currentConversation.messages.map((message, index) => {
-                const showAvatar = index === 0 || currentConversation.messages[index - 1].sender !== message.sender;
-                const isLastInGroup = index === currentConversation.messages.length - 1 || 
-                  currentConversation.messages[index + 1]?.sender !== message.sender;
+                const showHeader = index === 0 || currentConversation.messages[index - 1].sender !== message.sender;
                 
                 return (
                   <div
                     key={message.id}
                     className={cn(
-                      "flex gap-3 message-enter w-full",
-                      message.sender === 'user' ? "justify-end" : "justify-start"
+                      "message-enter w-full group",
+                      showHeader ? "mt-6" : "mt-1.5",
+                      index === 0 && "mt-0"
                     )}
                   >
-                    {message.sender === 'ai' && showAvatar && (
-                      <Avatar className="w-8 h-8 flex-shrink-0 avatar-glow mt-1">
-                        <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white">
-                          <Bot className="w-4 h-4" />
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                    {message.sender === 'ai' && !showAvatar && (
-                      <div className="w-8 h-8 flex-shrink-0" />
-                    )}
-                    
                     <div className={cn(
-                      "max-w-[75%] md:max-w-[65%] group",
+                      "max-w-[80%] md:max-w-[70%] w-fit min-w-0",
                       message.sender === 'user' ? "ml-auto" : "mr-auto"
                     )}>
-                      <div className={cn(
-                        "px-4 py-3 rounded-2xl smooth-transition hover:shadow-modern relative",
-                        message.sender === 'user' 
-                          ? "bg-primary text-primary-foreground rounded-br-md" 
-                          : "bg-card/50 backdrop-blur-sm border border-border/50 rounded-bl-md shadow-sm",
-                        !showAvatar && message.sender === 'user' && "rounded-br-2xl",
-                        !showAvatar && message.sender === 'ai' && "rounded-bl-2xl"
-                      )}>
+                      {showHeader && (
+                        <div className={cn(
+                          "mb-1.5 text-xs",
+                          message.sender === 'user' ? "text-right" : "text-left"
+                        )}>
+                          <span className={cn(
+                            "font-semibold",
+                            message.sender === 'user' ? "text-foreground" : "text-muted-foreground"
+                          )}>
+                            {message.sender === 'user' ? 'You' : 'Super AI'}
+                          </span>
+                          <span className="text-muted-foreground">{' · '}
+                            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        </div>
+                      )}
+                      <div
+                        className={cn(
+                          "px-4 py-3 rounded-2xl relative border min-w-0",
+                          message.sender === 'user'
+                            ? "rounded-tr-md"
+                            : "rounded-tl-md"
+                        )}
+                        style={{
+                          background: message.sender === 'user' ? chatTheme.userBg : chatTheme.aiBg,
+                          borderColor: message.sender === 'user' ? chatTheme.userBorder : chatTheme.aiBorder,
+                          color: message.sender === 'user' ? chatTheme.userText : chatTheme.aiText,
+                        }}
+                      >
                         {message.sender === 'ai' ? (
                           <MarkdownMessage content={message.text} />
                         ) : (
@@ -727,46 +1051,41 @@ const Chat = () => {
                             {message.text}
                           </p>
                         )}
-                        {isLastInGroup && (
-                          <div className={cn(
-                            "mt-2 text-xs opacity-70 flex",
-                            message.sender === 'user' ? "justify-end" : "justify-start"
-                          )}>
-                            {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyMessage(message.id, message.text)}
+                          className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
+                          aria-label="Copy message"
+                          title="Copy message"
+                        >
+                          {copiedMessageId === message.id ? (
+                            <Check className="w-3.5 h-3.5" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
                       </div>
                     </div>
-                    
-                    {message.sender === 'user' && showAvatar && (
-                      <Avatar className="w-8 h-8 flex-shrink-0 mt-1">
-                        <AvatarFallback className="bg-secondary text-secondary-foreground">
-                          <User className="w-4 h-4" />
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                    {message.sender === 'user' && !showAvatar && (
-                      <div className="w-8 h-8 flex-shrink-0" />
-                    )}
                   </div>
                 );
               })}
               
               {/* Typing Indicator */}
               {isTyping && (
-                <div className="flex gap-3 justify-start animate-slide-in">
-                  <Avatar className="w-8 h-8 flex-shrink-0 avatar-glow mt-1">
-                    <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white">
-                      <Bot className="w-4 h-4" />
-                    </AvatarFallback>
-                  </Avatar>
-                  <div className="max-w-[75%] md:max-w-[65%]">
-                    <div className="px-4 py-3 rounded-2xl bg-card/50 backdrop-blur-sm border border-border/50 rounded-bl-md shadow-sm">
-                      <div className="flex items-center gap-1">
-                        <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                        <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                        <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
-                      </div>
+                <div className="max-w-[80%] md:max-w-[70%] w-fit min-w-0 mr-auto animate-slide-in mt-6">
+                  <div className="mb-1.5 text-xs text-left">
+                    <span className="font-semibold text-muted-foreground">Super AI</span>
+                    <span className="text-muted-foreground">{' · '}typing</span>
+                  </div>
+                  <div
+                    className="px-4 py-3 rounded-2xl rounded-tl-md border"
+                    style={{ background: chatTheme.aiBg, borderColor: chatTheme.aiBorder }}
+                  >
+                    <div className="flex items-center gap-1">
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                      <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
                     </div>
                   </div>
                 </div>
@@ -778,10 +1097,7 @@ const Chat = () => {
             <div className="flex items-center justify-center h-full">
               <div className="text-center max-w-md mx-auto p-8">
                 <div className="mb-8">
-                  <div className="w-24 h-24 mx-auto mb-6 rounded-full flex items-center justify-center shadow-elegant animate-bounce"
-                       style={{ background: 'var(--gradient-primary)' }}>
-                    <Bot className="w-12 h-12 text-white" />
-                  </div>
+                  <AppLogo size={96} className="mx-auto mb-6 animate-bounce" />
                 </div>
                 <h2 className="text-4xl font-bold gradient-text mb-4">
                   Welcome! 👋
@@ -804,6 +1120,7 @@ const Chat = () => {
             </div>
           )}
         </ScrollArea>
+        </div>
 
         {/* Input Area */}
         <div className="p-4 border-t border-border bg-background/95 backdrop-blur-md shadow-elegant">
@@ -817,8 +1134,8 @@ const Chat = () => {
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
                   aria-label="Message Super AI"
-                  className="w-full min-h-[96px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 pb-12 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-                  rows={3}
+                  className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  rows={1}
                 />
 
                 <Button
@@ -868,9 +1185,7 @@ const Chat = () => {
             </div>
             
             <div className="mt-2 text-xs text-muted-foreground text-center">
-              <kbd className="px-2 py-0.5 bg-muted rounded text-xs font-mono">Enter</kbd> to send • 
-              <kbd className="px-2 py-0.5 bg-muted rounded text-xs font-mono mx-1">Shift + Enter</kbd> for new line • 
-              <kbd className="px-2 py-0.5 bg-muted rounded text-xs font-mono">⌘ + Enter</kbd> to send
+              Enter to send · Shift+Enter for a new line
             </div>
           </div>
         </div>

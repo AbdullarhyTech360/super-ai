@@ -1,6 +1,7 @@
 
 import { Link, useNavigate } from 'react-router-dom';
-import { Eye, EyeOff, MessageCircle, Mail, Lock } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock } from 'lucide-react';
+import AppLogo from '@/components/AppLogo';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -72,7 +73,7 @@ const onSubmit = async (data: LoginFormData) => {
         {/* Logo */}
         <div className="text-center mb-8">
           <Link to="/" className="inline-flex items-center gap-2 text-2xl font-bold text-foreground">
-            <MessageCircle className="w-8 h-8 text-primary" />
+            <AppLogo size={40} />
             Super AI
           </Link>
         </div>

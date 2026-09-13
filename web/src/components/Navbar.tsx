@@ -1,9 +1,10 @@
 
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { Bot, CircleHelp, LogOut, MessageCircle, Settings, User } from 'lucide-react';
+import { Bot, CircleHelp, LogOut, Settings, User } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import ThemeToggle from './ThemeToggle';
 import { useAuth } from '@/hooks/useAuth';
+import AppLogo from './AppLogo';
 
 const Navbar = () => {
   const location = useLocation();
@@ -16,7 +17,7 @@ const Navbar = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between items-center h-16">
           <Link to="/" className="flex items-center gap-2 font-bold text-xl text-foreground">
-            <MessageCircle className="w-8 h-8 text-primary" />
+            <AppLogo size={32} />
             Super AI
           </Link>
           {isAuthenticated && (

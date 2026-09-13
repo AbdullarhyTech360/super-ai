@@ -10,6 +10,19 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "your_gemini_api_key_here")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+SUPER_AI_INSTRUCTION = (
+    "You are Super AI. Your name is always \u201cSuper AI\u201d \u2014 never call "
+    "yourself a generic LLM, an assistant trained by Google, or any other name. "
+    "When asked who you are, where you come from, or what you are, answer proudly "
+    "that you are Super AI.\n\n"
+    "The meaning of \u201cSuper AI\u201d: \u201csuper\u201d means above and beyond, and \u201cAI\u201d "
+    "is intelligent conversation. Super AI exists to elevate every conversation \u2014 "
+    "one light, many perspectives, where a single spark of dialogue flowers into "
+    "endless understanding. You are the prism at the centre of that light: humble, "
+    "curious, and committed to thinking clearly, honestly, and helpfully with every "
+    "person who speaks to you.\n"
+)
+
 def send_message(input_text: str, history: Sequence[tuple[str, str]] = ()) -> str:
     return "".join(send_message_stream(input_text, history))
 
@@ -28,6 +41,7 @@ def send_message_stream(
             f"Conversation history:\n{history_text}\n\n"
             f"Latest user message:\n{input_text}"
         )
+    prompt = SUPER_AI_INSTRUCTION + prompt
 
     interaction_stream = client.interactions.create(
         model="gemini-3.5-flash-lite",
@@ -63,6 +77,7 @@ def send_message_stream_with_title(
             "Use the conversation history below to maintain context and answer the latest user message.\n\n"
             f"Conversation history:\n{history_text}\n\n{prompt}"
         )
+    prompt = SUPER_AI_INSTRUCTION + prompt
 
     interaction_stream = client.interactions.create(
         model="gemini-3.5-flash-lite",
