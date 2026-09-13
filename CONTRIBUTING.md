@@ -9,6 +9,7 @@ Thank you for contributing to our projects! This guide outlines our internal wor
 - [Getting Started](#getting-started)
 - [Development Workflow](#development-workflow)
   - [Branch Management](#branch-management)
+  - [Staging Only the Files You Worked On](#staging-only-the-files-you-worked-on)
   - [Commit Standards](#commit-standards)
 - [Code Standards](#code-standards)
 - [Testing and Documentation](#testing-and-documentation)
@@ -89,6 +90,26 @@ Thank you for contributing to our projects! This guide outlines our internal wor
   # After the work is merged into main, remove the remote branch
   git push origin --delete <branch-name>
   ```
+
+### Staging Only the Files You Worked On
+
+> **Critical for multi-agent work:** Never stage or commit work you did not author. Multiple agents may work in this repository at the same time, and a stray `git add` can sweep up another agent's in-flight work.
+
+- **Only `git add` the exact files you changed** — never use the catch-all forms:
+
+  ```bash
+  # Right — name only the files you worked on
+  git add web/src/pages/Chat.tsx web/src/lib/chatThemes.ts
+
+  # Wrong — sweeps in every untracked/modified file, including other agents' work
+  git add -A
+  git add .
+  git add --all
+  ```
+
+- **Inspect `git status` before staging** to see exactly what would be included, and leave any file you do not own untouched.
+- **Never commit another agent's work unless explicitly told to**, and never follow up on, finish, or wrap up their in-flight tasks without being asked.
+- **Seek approval before committing and pushing.** Agents must ask for explicit permission before creating a commit or pushing to any branch. Do not assume prior "commit and push" requests apply to future changes — confirm every time.
 
 ### Commit Standards
 
