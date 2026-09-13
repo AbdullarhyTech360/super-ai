@@ -29,7 +29,11 @@ const Help = () => {
     },
     {
       question: "Can I use voice messages?",
-      answer: "Yes! Click the microphone icon in the chat input to record voice messages. The AI can understand and respond to voice inputs."
+      answer: "Yes! Click the microphone icon in the chat input (or press Ctrl+M) to record voice messages. The AI can understand and respond to voice inputs."
+    },
+    {
+      question: "Are there keyboard shortcuts?",
+      answer: "Yes. Press / to focus the message input, Ctrl+M to record voice, Ctrl+Shift+E to open the emoji picker, and Enter / Shift+Enter to send or start a new line."
     },
     {
       question: "How do I enable dark mode?",
@@ -212,7 +216,7 @@ const Help = () => {
                 <CardContent className="space-y-3 text-sm">
                   <div className="flex items-start gap-2">
                     <div className="w-2 h-2 bg-primary rounded-full mt-2"></div>
-                    <span>Use keyboard shortcuts: Enter to send, Shift+Enter for new line</span>
+                    <span>Use keyboard shortcuts: Enter to send, Shift+Enter for new line, / to focus input, Ctrl+M for voice, Ctrl+Shift+E for emoji</span>
                   </div>
                   <div className="flex items-start gap-2">
                     <div className="w-2 h-2 bg-primary rounded-full mt-2"></div>

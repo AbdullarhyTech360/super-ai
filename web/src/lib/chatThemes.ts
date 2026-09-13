@@ -91,6 +91,32 @@ export const CHAT_THEMES: ChatTheme[] = [
     swatchUser: '#10b981',
     swatchAi: '#0d9488',
   },
+  {
+    id: 'blush',
+    label: 'Blush',
+    areaBg: 'linear-gradient(140deg, hsl(15 100% 96% / 0.95), hsl(320 90% 94% / 0.95), hsl(265 85% 93% / 0.95))',
+    userBg: 'linear-gradient(135deg, hsl(335 90% 80%), hsl(270 80% 82%))',
+    userText: 'hsl(270 45% 22%)',
+    userBorder: 'hsl(310 70% 82% / 0.9)',
+    aiBg: 'hsl(0 0% 100% / 0.85)',
+    aiText: 'hsl(270 35% 20%)',
+    aiBorder: 'hsl(320 60% 86% / 0.9)',
+    swatchUser: '#f9a8d4',
+    swatchAi: '#f3e8f9',
+  },
+  {
+    id: 'mist',
+    label: 'Mist',
+    areaBg: 'linear-gradient(140deg, hsl(210 95% 95% / 0.95), hsl(165 90% 94% / 0.95), hsl(260 85% 94% / 0.95))',
+    userBg: 'linear-gradient(135deg, hsl(200 85% 78%), hsl(160 75% 78%))',
+    userText: 'hsl(190 50% 18%)',
+    userBorder: 'hsl(190 70% 80% / 0.9)',
+    aiBg: 'hsl(0 0% 100% / 0.85)',
+    aiText: 'hsl(210 35% 18%)',
+    aiBorder: 'hsl(190 60% 84% / 0.9)',
+    swatchUser: '#7dd3fc',
+    swatchAi: '#eef7f5',
+  },
 ];
 
 export const DEFAULT_CHAT_THEME_ID = 'default';

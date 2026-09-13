@@ -1,10 +1,12 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Plus, Search, X, Paperclip, Mic, MicOff, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2 } from 'lucide-react';
+import { Send, Plus, Search, X, Paperclip, Mic, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2, Smile, Pause, Play } from 'lucide-react';
+import EmojiPicker, { type EmojiClickData, Theme as EmojiTheme } from 'emoji-picker-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -29,6 +31,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import { useTheme } from '@/hooks/useTheme';
 import MarkdownMessage from '@/components/MarkdownMessage';
 import AppLogo from '@/components/AppLogo';
 import SidebarShell from '@/components/SidebarShell';
@@ -133,11 +136,52 @@ const formatFileSize = (bytes: number) => {
   return `${bytes} B`;
 };
 
+const formatVoiceTime = (seconds: number) => {
+  const minutes = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const remaining = (seconds % 60).toString().padStart(2, '0');
+  return `${minutes}:${remaining}`;
+};
+
 const getGreeting = () => {
   const hour = new Date().getHours();
   if (hour < 12) return 'Good morning';
   if (hour < 17) return 'Good afternoon';
   return 'Good evening';
+};
+
+interface SpeechRecognitionEvent {
+  resultIndex: number;
+  results: {
+    length: number;
+    [index: number]: {
+      isFinal: boolean;
+      [index: number]: { transcript: string };
+    };
+  };
+}
+
+interface SpeechRecognitionInstance {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  onresult: ((event: SpeechRecognitionEvent) => void) | null;
+  onend: (() => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionInstance;
+
+interface SpeechRecognitionWindow extends Window {
+  SpeechRecognition?: SpeechRecognitionConstructor;
+  webkitSpeechRecognition?: SpeechRecognitionConstructor;
+}
+
+const getSpeechRecognition = (): SpeechRecognitionConstructor | null => {
+  const win = window as SpeechRecognitionWindow;
+  return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
 };
 
 const Chat = () => {
@@ -148,7 +192,23 @@ const Chat = () => {
   const [conversationSort, setConversationSort] = useState<ConversationSort>('last-used');
   const [newMessage, setNewMessage] = useState('');
   const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
-  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [voiceStatus, setVoiceStatus] = useState<'idle' | 'recording' | 'paused'>('idle');
+  const [voiceSeconds, setVoiceSeconds] = useState(0);
+  const [voiceLevel, setVoiceLevel] = useState(0);
+  const [voiceTranscript, setVoiceTranscript] = useState('');
+  const [emojiOpen, setEmojiOpen] = useState(false);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const voiceStatusRef = useRef<'idle' | 'recording' | 'paused'>('idle');
+  const voiceTranscriptRef = useRef('');
+  const voiceTimerRef = useRef<number | null>(null);
+  const voiceLevelRef = useRef(0);
+  const pauseRequestedRef = useRef(false);
+  const cleaningUpVoiceRef = useRef(false);
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const voiceRafRef = useRef<number | null>(null);
+  const { theme } = useTheme();
   const [isTyping, setIsTyping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -174,6 +234,11 @@ const Chat = () => {
   const streamMessageIdRef = useRef<string | null>(null);
   const streamDoneRef = useRef(false);
   const streamRevealTimerRef = useRef<number | null>(null);
+  const voiceActionsRef = useRef<{
+    start: () => void;
+    pause: () => void;
+    resume: () => void;
+  }>({ start: () => {}, pause: () => {}, resume: () => {} });
   const { authenticatedFetch } = useAuth();
   const { toast } = useToast();
 
@@ -254,6 +319,277 @@ const Chat = () => {
     });
   };
 
+  const handleEmojiClick = (emojiData: EmojiClickData) => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? newMessage.length;
+    const end = textarea?.selectionEnd ?? newMessage.length;
+    setNewMessage(prev => prev.slice(0, start) + emojiData.emoji + prev.slice(end));
+    if (textarea) {
+      const position = start + emojiData.emoji.length;
+      textarea.setSelectionRange(position, position);
+    }
+  };
+
+  const setVoiceState = (status: 'idle' | 'recording' | 'paused') => {
+    voiceStatusRef.current = status;
+    setVoiceStatus(status);
+  };
+
+  const computeVoiceLevel = () => {
+    const analyser = analyserRef.current;
+    if (!analyser) return null;
+    const buffer = new Uint8Array(analyser.fftSize);
+    analyser.getByteTimeDomainData(buffer);
+    let sum = 0;
+    for (let i = 0; i < buffer.length; i += 1) {
+      const delta = (buffer[i] - 128) / 128;
+      sum += delta * delta;
+    }
+    return Math.min(1, Math.sqrt(sum / buffer.length));
+  };
+
+  const stopVoiceMeter = () => {
+    if (voiceRafRef.current !== null) {
+      window.cancelAnimationFrame(voiceRafRef.current);
+      voiceRafRef.current = null;
+    }
+  };
+
+  const startVoiceMeter = () => {
+    stopVoiceMeter();
+    const tick = () => {
+      if (voiceStatusRef.current === 'paused') return;
+      let level = computeVoiceLevel();
+      if (level === null) {
+        level = 0.12 + 0.5 * (0.5 + 0.5 * Math.sin(Date.now() / 180));
+      }
+      const smoothed = voiceLevelRef.current * 0.6 + level * 0.4;
+      voiceLevelRef.current = smoothed;
+      setVoiceLevel(smoothed);
+      voiceRafRef.current = window.requestAnimationFrame(tick);
+    };
+    voiceRafRef.current = window.requestAnimationFrame(tick);
+  };
+
+  const stopVoiceTimer = () => {
+    if (voiceTimerRef.current !== null) {
+      window.clearInterval(voiceTimerRef.current);
+      voiceTimerRef.current = null;
+    }
+  };
+
+  const startVoiceTimer = () => {
+    stopVoiceTimer();
+    setVoiceSeconds(0);
+    voiceTimerRef.current = window.setInterval(() => {
+      setVoiceSeconds(seconds => seconds + 1);
+    }, 1000);
+  };
+
+  const cleanupVoiceSession = () => {
+    if (cleaningUpVoiceRef.current) return;
+    cleaningUpVoiceRef.current = true;
+    setVoiceState('idle');
+    setVoiceSeconds(0);
+    setVoiceLevel(0);
+    voiceLevelRef.current = 0;
+    pauseRequestedRef.current = false;
+    stopVoiceTimer();
+    stopVoiceMeter();
+    try { recognitionRef.current?.abort(); } catch { /* ignore */ }
+    recognitionRef.current = null;
+    const stream = micStreamRef.current;
+    if (stream) {
+      stream.getTracks().forEach(track => track.stop());
+      micStreamRef.current = null;
+    }
+    const context = audioCtxRef.current;
+    if (context) {
+      void context.close().catch(() => { /* ignore */ });
+      audioCtxRef.current = null;
+    }
+    analyserRef.current = null;
+    cleaningUpVoiceRef.current = false;
+  };
+
+  const startVoiceRecording = async () => {
+    const Recognition = getSpeechRecognition();
+    if (!Recognition) {
+      toast({
+        title: 'Voice input not supported',
+        description: 'Your browser does not support speech recognition. Try Chrome or Microsoft Edge.',
+      });
+      return;
+    }
+
+    voiceTranscriptRef.current = '';
+    setVoiceTranscript('');
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      micStreamRef.current = stream;
+      const audioContext = new AudioContext();
+      const source = audioContext.createMediaStreamSource(stream);
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      audioCtxRef.current = audioContext;
+      analyserRef.current = analyser;
+    } catch {
+      micStreamRef.current = null;
+      analyserRef.current = null;
+    }
+
+    const recognition = new Recognition();
+    recognition.lang = 'en-US';
+    recognition.continuous = true;
+    recognition.interimResults = true;
+
+    recognition.onresult = (event) => {
+      let segment = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        if (event.results[i].isFinal) {
+          segment += event.results[i][0].transcript;
+        }
+      }
+      const cleaned = segment.trim();
+      if (cleaned) {
+        voiceTranscriptRef.current = (voiceTranscriptRef.current + ' ' + cleaned).trim();
+        setVoiceTranscript(voiceTranscriptRef.current);
+      }
+    };
+
+    recognition.onend = () => {
+      if (voiceStatusRef.current === 'paused') return;
+      if (voiceStatusRef.current === 'recording' && !pauseRequestedRef.current) {
+        cleanupVoiceSession();
+      }
+    };
+
+    recognition.onerror = (event) => {
+      if (event.error === 'aborted') return;
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        toast({
+          title: 'Microphone access denied',
+          description: 'Allow microphone access in your browser to use voice input.',
+        });
+      }
+      cleanupVoiceSession();
+    };
+
+    recognitionRef.current = recognition;
+    setVoiceState('recording');
+    startVoiceTimer();
+    startVoiceMeter();
+
+    try {
+      recognition.start();
+    } catch {
+      toast({
+        title: 'Voice input unavailable',
+        description: 'Could not start the microphone, or you are already using it elsewhere.',
+      });
+      cleanupVoiceSession();
+    }
+  };
+
+  const pauseVoiceRecording = () => {
+    if (voiceStatusRef.current !== 'recording') return;
+    pauseRequestedRef.current = true;
+    setVoiceState('paused');
+    stopVoiceTimer();
+    stopVoiceMeter();
+    try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+  };
+
+  const resumeVoiceRecording = () => {
+    if (voiceStatusRef.current !== 'paused') return;
+    pauseRequestedRef.current = false;
+    setVoiceState('recording');
+    startVoiceTimer();
+    startVoiceMeter();
+    window.setTimeout(() => {
+      try {
+        recognitionRef.current?.start();
+      } catch {
+        toast({
+          title: 'Voice input unavailable',
+          description: 'Could not resume recording. Please try again.',
+        });
+        cleanupVoiceSession();
+      }
+    }, 150);
+  };
+
+  const sendVoiceRecording = () => {
+    const transcript = voiceTranscriptRef.current.trim();
+    cleanupVoiceSession();
+    if (!transcript) {
+      toast({
+        title: 'No speech detected',
+        description: 'Nothing was captured. Try recording again.',
+      });
+      return;
+    }
+    handleSendMessage(transcript);
+  };
+
+  const discardVoiceRecording = () => {
+    cleanupVoiceSession();
+  };
+
+  useEffect(() => {
+    voiceActionsRef.current = {
+      start: startVoiceRecording,
+      pause: pauseVoiceRecording,
+      resume: resumeVoiceRecording,
+    };
+  });
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isEditable =
+        !!target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable);
+      const hasModalOpen =
+        !!document.querySelector('[role="dialog"], [role="alertdialog"]');
+
+      if (event.key === '/') {
+        if (!event.ctrlKey && !event.metaKey && !event.altKey && !isEditable && !hasModalOpen) {
+          event.preventDefault();
+          textareaRef.current?.focus();
+        }
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && (event.key === 'm' || event.key === 'M')) {
+        event.preventDefault();
+        const status = voiceStatusRef.current;
+        if (status === 'idle') {
+          voiceActionsRef.current.start();
+        } else if (status === 'recording') {
+          voiceActionsRef.current.pause();
+        } else {
+          voiceActionsRef.current.resume();
+        }
+        return;
+      }
+
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && (event.key === 'e' || event.key === 'E')) {
+        event.preventDefault();
+        if (voiceStatusRef.current === 'idle') {
+          setEmojiOpen(open => !open);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [setEmojiOpen]);
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
@@ -272,6 +608,17 @@ const Chat = () => {
   useEffect(() => () => {
     if (streamRevealTimerRef.current) {
       window.clearInterval(streamRevealTimerRef.current);
+    }
+    if (voiceRafRef.current !== null) {
+      window.cancelAnimationFrame(voiceRafRef.current);
+    }
+    if (voiceTimerRef.current !== null) {
+      window.clearInterval(voiceTimerRef.current);
+    }
+    try { recognitionRef.current?.abort(); } catch { /* ignore */ }
+    micStreamRef.current?.getTracks().forEach(track => track.stop());
+    if (audioCtxRef.current) {
+      void audioCtxRef.current.close().catch(() => { /* ignore */ });
     }
   }, []);
 
@@ -1228,6 +1575,87 @@ const Chat = () => {
               </div>
             )}
 
+            {voiceStatus !== 'idle' ? (
+            <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3 py-2.5">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={discardVoiceRecording}
+                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive fast-transition"
+                aria-label="Delete recording"
+                title="Delete recording"
+              >
+                <Trash2 className="w-4 h-4" />
+              </Button>
+              <div className="flex-1 flex items-center gap-3 min-w-0">
+                <div className="flex items-end gap-[3px] h-7" aria-hidden="true">
+                  {Array.from({ length: 22 }).map((_, index) => {
+                    const wave = 0.25 + 0.75 * Math.abs(Math.sin(voiceLevel * Math.PI * 2 + index * 0.45));
+                    const height = Math.max(0.08, voiceLevel * wave);
+                    return (
+                      <span
+                        key={index}
+                        className="w-[3px] rounded-full transition-all duration-75"
+                        style={{
+                          height: `${height * 100}%`,
+                          background: voiceStatus === 'paused' ? 'var(--muted-foreground)' : 'var(--destructive)',
+                          opacity: voiceStatus === 'paused' ? 0.4 : 0.9,
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+                <span className="text-xs tabular-nums text-muted-foreground whitespace-nowrap">
+                  {formatVoiceTime(voiceSeconds)}
+                </span>
+                <span className="text-xs truncate text-muted-foreground min-w-0">
+                  {voiceStatus === 'paused'
+                    ? 'Paused'
+                    : voiceTranscript
+                      ? voiceTranscript
+                      : 'Listening...'}
+                </span>
+              </div>
+              {voiceStatus === 'recording' ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={pauseVoiceRecording}
+                  className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                  aria-label="Pause recording"
+                  title="Pause recording"
+                >
+                  <Pause className="w-4 h-4" />
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={resumeVoiceRecording}
+                  className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                  aria-label="Resume recording"
+                  title="Resume recording"
+                >
+                  <Play className="w-4 h-4" />
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                disabled={!voiceTranscript.trim()}
+                onClick={sendVoiceRecording}
+                className="h-8 w-8 p-0 smooth-transition hover:shadow-glow disabled:opacity-50"
+                style={{ background: 'var(--gradient-primary)' }}
+                aria-label="Send recording"
+                title="Send recording"
+              >
+                <Send className="w-4 h-4" />
+              </Button>
+            </div>
+          ) : (
             <div className="flex items-end gap-2">
               <div className="relative flex-1 min-w-0">
                 <Textarea
@@ -1237,7 +1665,7 @@ const Chat = () => {
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
                   aria-label="Message Super AI"
-                  className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 pl-11 pr-[76px] py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
                   rows={1}
                 />
 
@@ -1253,22 +1681,47 @@ const Chat = () => {
                   <Paperclip className="w-4 h-4" />
                 </Button>
 
+                <Popover open={emojiOpen} onOpenChange={setEmojiOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="absolute bottom-2 right-10 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                      aria-label="Insert emoji"
+                      title="Insert emoji (Ctrl+Shift+E)"
+                    >
+                      <Smile className="w-4 h-4" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    align="end"
+                    side="top"
+                    sideOffset={8}
+                    onFocusOutside={(event) => event.preventDefault()}
+                    className="w-auto border-border/60 p-0 shadow-modern overflow-hidden"
+                  >
+                    <EmojiPicker
+                      height={380}
+                      width={320}
+                      lazyLoadEmojis
+                      theme={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? EmojiTheme.DARK : EmojiTheme.LIGHT}
+                      onEmojiClick={handleEmojiClick}
+                    />
+                  </PopoverContent>
+                </Popover>
+
                 {!newMessage.trim() && (
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    onClick={() => setIsVoiceRecording(!isVoiceRecording)}
-                    className={cn(
-                      "absolute bottom-2 right-2 z-10 h-8 w-8 p-0 transition-all duration-200",
-                      isVoiceRecording
-                        ? "text-destructive hover:text-destructive/80 animate-pulse"
-                        : "text-muted-foreground hover:bg-hover-muted hover:text-foreground"
-                    )}
-                    aria-label={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
-                    title={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
+                    onClick={startVoiceRecording}
+                    className="absolute bottom-2 right-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                    aria-label="Start voice recording"
+                    title="Start voice recording (Ctrl+M)"
                   >
-                    {isVoiceRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                    <Mic className="w-4 h-4" />
                   </Button>
                 )}
               </div>
@@ -1287,10 +1740,11 @@ const Chat = () => {
                 )}
               </div>
             </div>
+          )}
           </div>
 
           <div className="mt-2 text-xs text-muted-foreground text-center">
-            Enter to send · Shift+Enter for a new line
+            Enter to send · Shift+Enter for a new line · / focuses input · Ctrl+M voice · Ctrl+Shift+E emoji
           </div>
         </div>
       </div>
