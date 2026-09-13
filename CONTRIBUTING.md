@@ -1,6 +1,6 @@
 # Contributing Guidelines
 
-Thank you for contributing to our projects! This guide outlines our internal workflow, code standards, and review process. Whether you're working on one project or multiple, please follow these best practices to ensure consistency and collaboration across all our repositories.
+Thank you for contributing to our projects! This guide outlines our internal workflow, code standards, and review process. It was originally designed for a collaborative team, but the project now follows a **solo development flow** where `main` is the single default branch. Collaboration is still welcome (pull requests are supported), but the default expectation is that you work directly on `main` and keep branches short-lived when you use them.
 
 ---
 
@@ -30,7 +30,7 @@ Thank you for contributing to our projects! This guide outlines our internal wor
    ```
 
 2. **Switch to the Main Branch:**\
-   Use the `main` branch as your base branch for development:
+   The `main` branch is the default and source of truth. For small changes, commits can go directly to `main`. Use a separate branch only for larger pieces of work:
 
   ```bash
   git checkout main
@@ -43,6 +43,8 @@ Thank you for contributing to our projects! This guide outlines our internal wor
 ## Development Workflow
 
 ### Branch Management
+
+> **Solo flow:** `main` is the default branch you work on. Branches are optional — create them only for substantial work that needs isolation, always base them on `main`, and keep them short-lived.
 
 - **Base Branch:**\
   Always create new branches off of the `main` branch.
@@ -75,6 +77,17 @@ Thank you for contributing to our projects! This guide outlines our internal wor
 
   ```bash
   git pull origin main --rebase
+  ```
+
+- **Delete Your Branch After Pushing:**\
+  Once a branch has been pushed, delete its local copy to keep your workspace tidy. Keep the remote branch until the work has been merged into `main`, then delete it as well:
+
+  ```bash
+  # After pushing, remove the local copy
+  git branch -d <branch-name>
+
+  # After the work is merged into main, remove the remote branch
+  git push origin --delete <branch-name>
   ```
 
 ### Commit Standards
@@ -196,6 +209,8 @@ When reporting issues, please follow these guidelines:
 
 ## Submitting Pull Requests
 
+> **Solo flow:** Pull requests are optional. In the default solo flow you commit directly to `main`. Use a pull request only when collaborating with others or when you want a record of the change before merging.
+
 ### PR Best Practices
 
 1. **Keep PRs Focused:**\
@@ -227,17 +242,17 @@ When reporting issues, please follow these guidelines:
 ## Review Process
 
 - **Automated Checks:**\
-  Your pull request must pass all CI/CD tests. [Coming Soon...]
+  Commits must pass all CI/CD tests. [Coming Soon...]
 - **Self-Review:**\
-  Review the diff, verify the tests and checks, and confirm that the change matches the issue before merging.
+  Review the diff, verify the tests and checks, and confirm the change is complete before committing or merging.
 - **Address Feedback:**\
-  Address feedback from automated checks or optional external reviewers.
-- **Final Merge:**\
-  The project owner may merge the pull request after completing the self-review.
+  Address any issues found during self-review (or feedback from reviewers when collaborating).
+- **Final Merge (branch-based work):**\
+  Merge the branch into `main` after completing the self-review. A pull request is only required if you collaborate with others; otherwise you may merge directly.
 - **Squash and Merge:**\
-  When merging, use squash and merge to combine all branch commits into a single commit. This creates clean deployment boundaries between environments and simplifies rollbacks. Each squashed commit should represent a complete, working feature. Delete the branch after merging.
+  When merging via a pull request, use squash and merge to combine all branch commits into a single commit. This creates clean deployment boundaries between environments and simplifies rollbacks. Each squashed commit should represent a complete, working feature. Delete the branch after merging.
 - **Merge Conflicts:**\
-  Resolve any merge conflicts before merging your pull request. If you encounter conflicts, rebase your branch against the `main` branch and resolve them locally. After resolving, push the changes to your branch.
+  Resolve any merge conflicts before merging. If you encounter conflicts, rebase your branch against the `main` branch and resolve them locally. After resolving, push the changes to your branch.
 
 ---
 
