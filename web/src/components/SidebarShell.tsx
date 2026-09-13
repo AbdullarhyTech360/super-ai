@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { Bot, ChevronDown, CircleHelp, Info, LogOut, Moon, Monitor, Palette, PanelLeftClose, PanelLeftOpen, Settings, Sun, User } from 'lucide-react';
+import { ChevronDown, CircleHelp, Info, LogOut, MessageSquare, Moon, Monitor, Palette, PanelLeftClose, PanelLeftOpen, Settings, Sun, User } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTheme } from '@/hooks/useTheme';
 import { useAuth } from '@/hooks/useAuth';
@@ -38,7 +38,7 @@ interface SidebarShellProps {
 }
 
 const NAV_ITEMS = [
-  { path: '/chat', label: 'Chat', icon: Bot },
+  { path: '/chat', label: 'Chat', icon: MessageSquare },
   { path: '/profile', label: 'Profile', icon: User },
   { path: '/settings', label: 'Settings', icon: Settings },
   { path: '/help', label: 'Help', icon: CircleHelp },

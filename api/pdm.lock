@@ -5,7 +5,7 @@
 groups = ["default", "dev"]
 strategy = ["inherit_metadata"]
 lock_version = "4.5.0"
-content_hash = "sha256:48a25476aea7a1d14ec335e70b755b4136cb70c6bc7e044e40d1ea59d77c2fd2"
+content_hash = "sha256:e1d97f7937f2977c1ca0cf6d2a7b2f46f598c59fb3a73ae0b4c5484182102049"
 
 [[metadata.targets]]
 requires_python = "==3.13.*"
@@ -674,6 +674,17 @@ groups = ["default"]
 files = [
     {file = "python_dotenv-1.2.3-py3-none-any.whl", hash = "sha256:904552145e8bfed22162c09dab1c2b9b54fefa7b23ba780f4f26ca0316b0f0d9"},
     {file = "python_dotenv-1.2.3.tar.gz", hash = "sha256:a20a594dabeaa385725aa239d5244871c143ecb356add8a20fcf23773a6c3a35"},
+]
+
+[[package]]
+name = "python-multipart"
+version = "0.0.32"
+requires_python = ">=3.10"
+summary = "A streaming multipart parser for Python"
+groups = ["default"]
+files = [
+    {file = "python_multipart-0.0.32-py3-none-any.whl", hash = "sha256:ff6d3f776f16878c894e52e107296ffc890e913c611b1a4ec6c44e2821fe2e23"},
+    {file = "python_multipart-0.0.32.tar.gz", hash = "sha256:be54b7f3fa167bb83e4fcd936b887b708f4e57fe75911c02aebf53efaf8d938e"},
 ]
 
 [[package]]

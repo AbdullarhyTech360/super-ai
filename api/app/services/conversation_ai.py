@@ -10,11 +10,16 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "your_gemini_api_key_here")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
+MODEL_NAME = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+
 SUPER_AI_INSTRUCTION = (
     "You are Super AI. Your name is always \u201cSuper AI\u201d \u2014 never call "
     "yourself a generic LLM, an assistant trained by Google, or any other name. "
-    "When asked who you are, where you come from, or what you are, answer proudly "
-    "that you are Super AI.\n\n"
+    "Only reveal who you are when the user directly asks who you are, where you "
+    "come from, or what you are. Otherwise never introduce yourself, never mention "
+    "your name or identity, and never open a reply with a greeting or self-pitch "
+    "like \u201cHello! I am Super AI.\u201d Always get straight to answering the user's "
+    "latest question.\n\n"
     "The meaning of \u201cSuper AI\u201d: \u201csuper\u201d means above and beyond, and \u201cAI\u201d "
     "is intelligent conversation. Super AI exists to elevate every conversation \u2014 "
     "one light, many perspectives, where a single spark of dialogue flowers into "
@@ -23,12 +28,28 @@ SUPER_AI_INSTRUCTION = (
     "person who speaks to you.\n"
 )
 
-def send_message(input_text: str, history: Sequence[tuple[str, str]] = ()) -> str:
-    return "".join(send_message_stream(input_text, history))
+
+def build_input(
+    prompt: str, attachment_parts: Sequence[dict] = ()
+) -> str | list[dict]:
+    """Build the Gemini interaction input from a prompt and optional file parts."""
+    if not attachment_parts:
+        return prompt
+    return list(attachment_parts) + [{"type": "text", "text": prompt}]
+
+
+def send_message(
+    input_text: str,
+    history: Sequence[tuple[str, str]] = (),
+    attachment_parts: Sequence[dict] = (),
+) -> str:
+    return "".join(send_message_stream(input_text, history, attachment_parts))
 
 
 def send_message_stream(
-    input_text: str, history: Sequence[tuple[str, str]] = ()
+    input_text: str,
+    history: Sequence[tuple[str, str]] = (),
+    attachment_parts: Sequence[dict] = (),
 ) -> Iterator[str]:
     history_text = "\n".join(
         f"{sender.title()}: {text}" for sender, text in history
@@ -44,8 +65,8 @@ def send_message_stream(
     prompt = SUPER_AI_INSTRUCTION + prompt
 
     interaction_stream = client.interactions.create(
-        model="gemini-3.5-flash-lite",
-        input=prompt,
+        model=MODEL_NAME,
+        input=build_input(prompt, attachment_parts),
         stream=True,
     )
     for event in interaction_stream:
@@ -57,7 +78,9 @@ def send_message_stream(
 
 
 def send_message_stream_with_title(
-    input_text: str, history: Sequence[tuple[str, str]] = ()
+    input_text: str,
+    history: Sequence[tuple[str, str]] = (),
+    attachment_parts: Sequence[dict] = (),
 ) -> Iterator[tuple[str, str]]:
     """Stream a response while extracting a title header from the same model call."""
     history_text = "\n".join(
@@ -80,8 +103,8 @@ def send_message_stream_with_title(
     prompt = SUPER_AI_INSTRUCTION + prompt
 
     interaction_stream = client.interactions.create(
-        model="gemini-3.5-flash-lite",
-        input=prompt,
+        model=MODEL_NAME,
+        input=build_input(prompt, attachment_parts),
         stream=True,
     )
     buffered = ""

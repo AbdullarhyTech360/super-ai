@@ -6,16 +6,23 @@ import jwt
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from sqlmodel import Session
 from app.db.session import get_session
 from app.db.database import create_db_and_tables
 from app.models.user import User
 from app.models.forms import SignUp, Login
-from app.schemas.conversation_role import Chat_role, Rename_request
+from app.schemas.conversation_role import Rename_request, ConversationBulkDeleteRequest
 from app.services.conversation_ai import send_message_stream, send_message_stream_with_title
+from app.services.uploads import (
+    UPLOADS_DIR,
+    attachment_url,
+    build_ai_parts,
+    save_upload,
+)
 
 import os
 from dotenv import load_dotenv
@@ -46,6 +53,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 sessionDep = Annotated[Session, Depends(get_session)]
 
 # Create some helpers
@@ -143,24 +151,44 @@ def get_current_user_info(
 
 @app.post("/api/chat")
 def chat_with_ai(
-    chat_model: Chat_role,
     current_user: Annotated[User, Depends(get_current_user)],
     session: sessionDep,
+    input: Annotated[str, Form()] = "",
+    is_new: Annotated[bool, Form()] = True,
+    conversation_id: Annotated[str | None, Form()] = None,
+    files: Annotated[list[UploadFile], File()] = [],
 ):
-    from app.models.chat import Conversation, Message
+    from app.models.chat import Attachment, Conversation, Message
 
-    if chat_model.is_new or chat_model.conversation_id is None:
+    input_text = " ".join(input.split())[:8000].strip()
+    saved_attachments = [
+        save_upload(current_user.id, upload) for upload in files
+    ]
+
+    if not input_text and saved_attachments:
+        input_text = (
+            f"Describe or summarize the attached file(s): "
+            + ", ".join(attachment[2] for attachment in saved_attachments) + "."
+        )
+    if not input_text:
+        for upload in files:
+            upload.file.close()
+        raise HTTPException(status_code=400, detail="Message cannot be empty.")
+
+    if is_new or conversation_id is None:
         new_conversation = Conversation(
             user_id=current_user.id,
-            title=chat_model.input[:50],
+            title=input_text[:50],
         )
         session.add(new_conversation)
         session.commit()
         session.refresh(new_conversation)
         conversation = new_conversation
     else:
-        conversation = session.get(Conversation, chat_model.conversation_id)
+        conversation = session.get(Conversation, conversation_id)
         if conversation is None or conversation.user_id != current_user.id:
+            for upload in files:
+                upload.file.close()
             raise HTTPException(status_code=404, detail="Conversation not found")
 
     history = [
@@ -172,25 +200,48 @@ def chat_with_ai(
     ]
     conversation_id = conversation.id
 
+    attachment_meta = [
+        {
+            "id": attachment_id,
+            "generated_name": generated_name,
+            "filename": filename,
+            "mime_type": mime_type,
+            "size": size,
+        }
+        for attachment_id, generated_name, filename, mime_type, size in saved_attachments
+    ]
+    ai_parts = build_ai_parts(attachment_meta, current_user.id)
+    start_attachments = [
+        {
+            "id": meta["id"],
+            "filename": meta["filename"],
+            "mime_type": meta["mime_type"],
+            "size": meta["size"],
+            "url": attachment_url(current_user.id, meta["generated_name"]),
+        }
+        for meta in attachment_meta
+    ]
+
     def stream_response():
         import json
-        fallback_title = " ".join(chat_model.input.split())[:50].strip()
+        fallback_title = input_text[:50]
 
         yield json.dumps({
             "type": "start",
             "conversation_id": conversation_id,
-            "title": fallback_title if chat_model.is_new or chat_model.conversation_id is None else None,
+            "title": fallback_title if is_new or conversation_id is None else None,
+            "attachments": start_attachments,
         }) + "\n"
 
         response_parts = []
-        if chat_model.is_new or chat_model.conversation_id is None:
-            stream = send_message_stream_with_title(chat_model.input, history)
+        if is_new or conversation_id is None:
+            stream = send_message_stream_with_title(input_text, history, ai_parts)
             title = ""
             for event_type, value in stream:
                 if event_type == "title":
                     title = " ".join(value.split())[:50].strip()
                     if not title:
-                        title = " ".join(chat_model.input.split())[:50].strip()
+                        title = input_text[:50]
                     conversation.title = title
                     session.add(conversation)
                     session.commit()
@@ -199,13 +250,30 @@ def chat_with_ai(
                     response_parts.append(value)
                     yield json.dumps({"type": "chunk", "text": value}) + "\n"
         else:
-            for chunk in send_message_stream(chat_model.input, history):
+            for chunk in send_message_stream(input_text, history, ai_parts):
                 response_parts.append(chunk)
                 yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
 
         response = "".join(response_parts)
+        user_message = Message(
+            conversation_id=conversation_id,
+            text=input_text,
+            sender="user",
+        )
+        session.add(user_message)
+        session.commit()
+        session.refresh(user_message)
+
+        for meta in attachment_meta:
+            session.add(Attachment(
+                message_id=user_message.id,
+                filename=meta["filename"],
+                mime_type=meta["mime_type"],
+                size=meta["size"],
+                stored_path=meta["generated_name"],
+            ))
+
         session.add_all([
-            Message(conversation_id=conversation_id, text=chat_model.input, sender="user"),
             Message(conversation_id=conversation_id, text=response, sender="ai"),
         ])
         conversation.updated_at = datetime.now(timezone.utc)
@@ -244,7 +312,27 @@ def get_conversations(
             "title": conversation.title,
             "created_at": messages[0].created_at if messages else conversation.updated_at,
             "updated_at": conversation.updated_at,
-            "messages": messages,
+            "messages": [
+                {
+                    "id": message.id,
+                    "text": message.text,
+                    "sender": message.sender,
+                    "created_at": message.created_at,
+                    "attachments": [
+                        {
+                            "id": attachment.id,
+                            "filename": attachment.filename,
+                            "mime_type": attachment.mime_type,
+                            "size": attachment.size,
+                            "url": attachment_url(
+                                current_user.id, attachment.stored_path
+                            ),
+                        }
+                        for attachment in message.attachments
+                    ],
+                }
+                for message in messages
+            ],
         })
 
     return {"conversations": conversation_data}
@@ -255,15 +343,73 @@ def delete_conversation(
     current_user: Annotated[User, Depends(get_current_user)],
     session: sessionDep,
 ):
-    from app.models.chat import Conversation
+    from app.models.chat import Attachment, Conversation, Message
 
     conversation = session.get(Conversation, conversation_id)
     if conversation is None or conversation.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
+    stored_paths = []
+    for message in session.query(Message).filter(
+        Message.conversation_id == conversation.id
+    ).all():
+        for attachment in message.attachments:
+            stored_paths.append(attachment.stored_path)
+
     session.delete(conversation)
     session.commit()
+
+    for stored_path in stored_paths:
+        target = UPLOADS_DIR / current_user.id / stored_path
+        target.unlink(missing_ok=True)
     return {"message": "Conversation was deleted successfully."}
+
+@app.post("/api/conversations/bulk-delete")
+def bulk_delete_conversations(
+    request: ConversationBulkDeleteRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    from app.models.chat import Attachment, Conversation, Message
+
+    conversation_ids = request.conversation_ids
+    if not conversation_ids:
+        raise HTTPException(status_code=400, detail="No conversation ids provided")
+
+    conversations = (
+        session.query(Conversation)
+        .filter(
+            Conversation.user_id == current_user.id,
+            Conversation.id.in_(conversation_ids),
+        )
+        .all()
+    )
+    if not conversations:
+        raise HTTPException(status_code=404, detail="No matching conversations found")
+
+    conversation_ids_found = [c.id for c in conversations]
+    stored_paths = []
+    messages = (
+        session.query(Message)
+        .filter(Message.conversation_id.in_(conversation_ids_found))
+        .all()
+    )
+    for message in messages:
+        for attachment in message.attachments:
+            stored_paths.append(attachment.stored_path)
+
+    for conversation in conversations:
+        session.delete(conversation)
+    session.commit()
+
+    for stored_path in stored_paths:
+        target = UPLOADS_DIR / current_user.id / stored_path
+        target.unlink(missing_ok=True)
+
+    return {
+        "message": f"{len(conversations)} conversation(s) deleted successfully.",
+        "deleted": len(conversations),
+    }
 
 @app.put("/api/conversations/{conversation_id}")
 def rename_conversation(

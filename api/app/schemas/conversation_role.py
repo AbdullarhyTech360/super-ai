@@ -7,3 +7,6 @@ class Chat_role(SQLModel):
 
 class Rename_request(SQLModel):
     title: str = Field(default="")
+
+class ConversationBulkDeleteRequest(SQLModel):
+    conversation_ids: list[str] = Field(default_factory=list)

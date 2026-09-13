@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Plus, Search, X, Paperclip, Mic, MicOff, Pencil, Copy, Check, ListFilter, SquarePen } from 'lucide-react';
+import { Send, Plus, Search, X, Paperclip, Mic, MicOff, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2 } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -33,12 +33,31 @@ import MarkdownMessage from '@/components/MarkdownMessage';
 import AppLogo from '@/components/AppLogo';
 import SidebarShell from '@/components/SidebarShell';
 import { CHAT_THEMES, getChatTheme, type ChatTheme } from '@/lib/chatThemes';
+import { Checkbox } from '@/components/ui/checkbox';
 
 interface Message {
   id: string;
   text: string;
   sender: 'user' | 'ai';
   timestamp: Date;
+  attachments?: Attachment[];
+}
+
+interface Attachment {
+  id: string;
+  filename: string;
+  mime_type: string;
+  size: number;
+  url: string;
+}
+
+interface PendingAttachment {
+  id: string;
+  file: File;
+  name: string;
+  size: number;
+  mimeType: string;
+  url: string;
 }
 
 interface Conversation {
@@ -54,6 +73,7 @@ interface MessageDto {
   text: string;
   sender: 'user' | 'ai';
   created_at: string;
+  attachments?: Attachment[];
 }
 
 interface ConversationDto {
@@ -72,6 +92,47 @@ const suggestionPrompts = [
   'Write and edit content professionally',
 ];
 
+const MAX_FILE_SIZE = 25 * 1024 * 1024;
+
+const ACCEPTED_FILE_TYPES = [
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+  'image/bmp',
+  'image/heic',
+  'application/pdf',
+  'application/msword',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.ms-excel',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-powerpoint',
+  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  'text/plain',
+  'text/markdown',
+  'text/csv',
+  'application/json',
+  'text/html',
+  'text/css',
+  'text/javascript',
+  'application/javascript',
+  'application/typescript',
+  'text/x-typescript',
+  'text/x-python',
+];
+
+const isAcceptedFile = (file: File) =>
+  ACCEPTED_FILE_TYPES.includes(file.type) ||
+  file.type.startsWith('text/') ||
+  file.type === '';
+
+const formatFileSize = (bytes: number) => {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
+};
+
 const getGreeting = () => {
   const hour = new Date().getHours();
   if (hour < 12) return 'Good morning';
@@ -86,12 +147,16 @@ const Chat = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [conversationSort, setConversationSort] = useState<ConversationSort>('last-used');
   const [newMessage, setNewMessage] = useState('');
+  const [pendingAttachments, setPendingAttachments] = useState<PendingAttachment[]>([]);
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
+  const [isMultiSelect, setIsMultiSelect] = useState(false);
+  const [selectedConversationIds, setSelectedConversationIds] = useState<Set<string>>(new Set());
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
   const [conversationToRename, setConversationToRename] = useState<string | null>(null);
   const [renameTitle, setRenameTitle] = useState('');
@@ -138,8 +203,54 @@ const Chat = () => {
   const handleNewChat = () => {
     setActiveConversation(null);
     setNewMessage('');
+    pendingAttachments.forEach(attachment => URL.revokeObjectURL(attachment.url));
+    setPendingAttachments([]);
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
+    });
+  };
+
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(event.target.files ?? []);
+    event.target.value = '';
+
+    const rejected = files.filter(file => !isAcceptedFile(file));
+    const oversized = files.filter(file => isAcceptedFile(file) && file.size > MAX_FILE_SIZE);
+    const accepted = files.filter(file => isAcceptedFile(file) && file.size <= MAX_FILE_SIZE);
+
+    if (rejected.length) {
+      toast({
+        title: 'File type not supported',
+        description: `${rejected.map(file => file.name).join(', ')}. Images, PDFs, docs, and text files are allowed.`,
+      });
+    }
+    if (oversized.length) {
+      toast({
+        title: 'File too large',
+        description: `${oversized.map(file => file.name).join(', ')} is larger than 25 MB.`,
+      });
+    }
+
+    if (!accepted.length) return;
+
+    setPendingAttachments(prev => [
+      ...prev,
+      ...accepted.map(file => ({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        file,
+        name: file.name,
+        size: file.size,
+        mimeType: file.type || 'application/octet-stream',
+        url: URL.createObjectURL(file),
+      })),
+    ]);
+  };
+
+  const removePendingAttachment = (id: string) => {
+    setPendingAttachments(prev => {
+      const target = prev.find(attachment => attachment.id === id);
+      if (target) URL.revokeObjectURL(target.url);
+      return prev.filter(attachment => attachment.id !== id);
     });
   };
 
@@ -187,6 +298,7 @@ const Chat = () => {
             text: message.text,
             sender: message.sender,
             timestamp: new Date(message.created_at),
+            attachments: message.attachments ?? [],
           })),
         }));
         setConversations(loadedConversations);
@@ -258,8 +370,63 @@ const Chat = () => {
     setDeleteDialogOpen(true);
   };
 
+  const toggleMultiSelect = (enabled: boolean) => {
+    setIsMultiSelect(enabled);
+    if (!enabled) {
+      setSelectedConversationIds(new Set());
+    }
+  };
+
+  const toggleConversationSelect = (id: string) => {
+    setSelectedConversationIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+
   const confirmDelete = () => {
-    if (conversationToDelete) {
+    if (isMultiSelect && selectedConversationIds.size > 0) {
+      const ids = Array.from(selectedConversationIds);
+      const count = ids.length;
+      authenticatedFetch('http://localhost:8000/api/conversations/bulk-delete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+        body: JSON.stringify({ conversation_ids: ids }),
+      })
+        .then(async (response) => {
+          if (!response.ok) {
+            let detail = 'Failed to delete the selected chats.';
+            try {
+              const error = await response.json();
+              if (error?.detail) detail = typeof error.detail === 'string' ? error.detail : detail;
+            } catch { /* keep default message */ }
+            throw new Error(detail);
+          }
+        })
+        .catch(error => {
+          console.error('Error deleting conversations:', error);
+          toast({
+            title: 'Error',
+            description: error instanceof Error ? error.message : 'Failed to delete the selected chats.',
+          });
+        });
+      setConversations(prev => prev.filter(conv => !selectedConversationIds.has(conv.id)));
+      if (activeConversation && selectedConversationIds.has(activeConversation)) {
+        setActiveConversation(null);
+      }
+      toast({
+        title: `${count} chats deleted`,
+        description: 'The selected chats and their uploaded media files have been permanently deleted.',
+      });
+    } else if (conversationToDelete) {
       const conversationTitle = conversations.find(conv => conv.id === conversationToDelete)?.title || 'Conversation';
       authenticatedFetch(`http://localhost:8000/api/conversations/${conversationToDelete}`, {
         method: 'DELETE',
@@ -273,11 +440,15 @@ const Chat = () => {
       }
       toast({
         title: "Chat deleted",
-        description: `"${conversationTitle}" has been deleted successfully.`,
+        description: `"${conversationTitle}" and its uploaded media files have been permanently deleted.`,
       });
     }
     setDeleteDialogOpen(false);
     setConversationToDelete(null);
+    if (isMultiSelect) {
+      setSelectedConversationIds(new Set());
+      setIsMultiSelect(false);
+    }
   };
 
   const cancelDelete = () => {
@@ -395,7 +566,8 @@ const Chat = () => {
 
   const handleSendMessage = useCallback((overrideText?: string) => {
     const text = (overrideText ?? newMessage).trim();
-    if (!text) return;
+    const sentAttachments = pendingAttachments;
+    if (!text && sentAttachments.length === 0) return;
 
     const localConversationId = activeConversation ?? Date.now().toString();
 
@@ -403,7 +575,14 @@ const Chat = () => {
       id: Date.now().toString(),
       text,
       sender: 'user',
-      timestamp: new Date()
+      timestamp: new Date(),
+      attachments: sentAttachments.map(attachment => ({
+        id: attachment.id,
+        filename: attachment.name,
+        mime_type: attachment.mimeType,
+        size: attachment.size,
+        url: attachment.url,
+      })),
     };
 
     if (activeConversation) {
@@ -425,6 +604,7 @@ const Chat = () => {
     }
 
     setNewMessage('');
+    setPendingAttachments([]);
     setIsTyping(true);
 
     // use an api call to get the AI response instead of a simulated response
@@ -437,20 +617,33 @@ const Chat = () => {
       streamDoneRef.current = false;
       try {
         const accessToken = localStorage.getItem('access_token');
+        const formData = new FormData();
+        formData.append('input', text);
+        formData.append('is_new', String(!activeConversation));
+        if (activeConversation) {
+          formData.append('conversation_id', activeConversation);
+        }
+        sentAttachments.forEach(attachment => formData.append('files', attachment.file));
+
         const response = await authenticatedFetch('http://localhost:8000/api/chat', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
             'Authorization': `Bearer ${accessToken}`,
           },
-          body: JSON.stringify({
-            input: text,
-            conversation_id: activeConversation,
-            is_new: !activeConversation, // If there's no active conversation, it's a new one
-          }),
+          body: formData,
         });
 
-        if (!response.ok || !response.body) throw new Error('Failed to get a response');
+        if (!response.ok) {
+          let detail = 'Failed to get a response from the AI. Please check your connection or try again later.';
+          try {
+            const error = await response.json();
+            if (error?.detail) {
+              detail = typeof error.detail === 'string' ? error.detail : 'Failed to process the request.';
+            }
+          } catch { /* keep default message */ }
+          throw new Error(detail);
+        }
+        if (!response.body) throw new Error('Failed to get a response');
 
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
@@ -475,10 +668,21 @@ const Chat = () => {
                   ? {
                       ...conv,
                       id: responseConversationId,
+                      messages: event.attachments?.length
+                        ? (() => {
+                            const messages = [...conv.messages];
+                            const lastIndex = messages.length - 1;
+                            if (lastIndex >= 0 && messages[lastIndex].sender === 'user') {
+                              messages[lastIndex] = { ...messages[lastIndex], attachments: event.attachments };
+                            }
+                            return messages;
+                          })()
+                        : conv.messages,
                       ...(event.title ? { title: event.title } : {}),
                     }
                   : conv
               ));
+              sentAttachments.forEach(attachment => URL.revokeObjectURL(attachment.url));
             } else if (event.type === 'title') {
               setConversations(prev => prev.map(conv =>
                 conv.id === responseConversationId || conv.id === localConversationId
@@ -513,14 +717,14 @@ const Chat = () => {
         streamQueueRef.current = [];
         streamDoneRef.current = true;
         setIsTyping(false);
-        toast({
-          title: 'Error',
-          description: 'Failed to get a response from the AI. Please check your connection or try again later.',
-        });
+        const description = error instanceof Error
+          ? error.message
+          : 'Failed to get a response from the AI. Please check your connection or try again later.';
+        toast({ title: 'Error', description });
         return;
       }
     })();
-  }, [newMessage, activeConversation, authenticatedFetch, toast]);
+  }, [newMessage, activeConversation, pendingAttachments, authenticatedFetch, toast]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
@@ -547,6 +751,24 @@ const Chat = () => {
       const secondDate = conversationSort === 'created' ? second.createdAt : second.updatedAt;
       return secondDate.getTime() - firstDate.getTime();
     });
+
+  const visibleConversationIds = filteredConversations.map(conv => conv.id);
+  const allVisibleConversationsSelected = visibleConversationIds.length > 0
+    && visibleConversationIds.every(id => selectedConversationIds.has(id));
+  const someVisibleConversationsSelected = visibleConversationIds.some(id => selectedConversationIds.has(id));
+
+  const handleSelectAllToggle = (checked: boolean | 'indeterminate') => {
+    const shouldSelectAll = checked === true || checked === 'indeterminate';
+    setSelectedConversationIds(prev => {
+      const next = new Set(prev);
+      if (shouldSelectAll) {
+        visibleConversationIds.forEach(id => next.add(id));
+      } else {
+        visibleConversationIds.forEach(id => next.delete(id));
+      }
+      return next;
+    });
+  };
 
   return (
     <SidebarShell
@@ -612,25 +834,77 @@ const Chat = () => {
             />
           </div>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="sm" className="w-full mt-2 justify-start gap-2 text-muted-foreground hover:text-foreground">
-                <ListFilter className="w-4 h-4" />
-                Sort: {conversationSort === 'last-used' ? 'Last used' : conversationSort === 'name' ? 'Name' : 'Created'}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="w-64">
-              <DropdownMenuLabel>Arrange conversations</DropdownMenuLabel>
-              <DropdownMenuRadioGroup
-                value={conversationSort}
-                onValueChange={(value) => setConversationSort(value as ConversationSort)}
+          {isMultiSelect ? (
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-primary">
+                  {selectedConversationIds.size} selected
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => toggleMultiSelect(false)}
+                  className="h-8 px-2 text-muted-foreground hover:text-foreground fast-transition"
+                >
+                  <X className="w-3.5 h-3.5 mr-1" />
+                  Cancel
+                </Button>
+              </div>
+              <div className="flex items-center gap-2">
+                <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                  <Checkbox
+                    checked={allVisibleConversationsSelected
+                      ? true
+                      : someVisibleConversationsSelected ? 'indeterminate' : false}
+                    onCheckedChange={handleSelectAllToggle}
+                  />
+                  Select all
+                </label>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={selectedConversationIds.size === 0}
+                  onClick={() => setDeleteDialogOpen(true)}
+                  className="flex-1 smooth-transition"
+                >
+                  <Trash2 className="w-4 h-4 mr-1" />
+                  Delete ({selectedConversationIds.size})
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-2 flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => toggleMultiSelect(true)}
+                className="flex-1 justify-center gap-2 text-muted-foreground hover:text-foreground fast-transition"
+                title="Select multiple chats to delete at once"
               >
-                <DropdownMenuRadioItem value="last-used">Last used</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="created">Time created</DropdownMenuRadioItem>
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+                <ListChecks className="w-4 h-4" />
+                Select
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="sm" className="flex-1 justify-center gap-2 text-muted-foreground hover:text-foreground fast-transition">
+                    <ListFilter className="w-4 h-4" />
+                    Sort: {conversationSort === 'last-used' ? 'Last used' : conversationSort === 'name' ? 'Name' : 'Created'}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-64">
+                  <DropdownMenuLabel>Arrange conversations</DropdownMenuLabel>
+                  <DropdownMenuRadioGroup
+                    value={conversationSort}
+                    onValueChange={(value) => setConversationSort(value as ConversationSort)}
+                  >
+                    <DropdownMenuRadioItem value="last-used">Last used</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="name">Name</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="created">Time created</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+          )}
         </>
       }
       sidebarContent={
@@ -638,18 +912,33 @@ const Chat = () => {
           {filteredConversations.map((conversation) => (
             <div
               key={conversation.id}
-              onClick={() => setActiveConversation(conversation.id)}
+              onClick={() => isMultiSelect
+                ? toggleConversationSelect(conversation.id)
+                : setActiveConversation(conversation.id)}
               className={cn(
-                "p-3 rounded-lg cursor-pointer transition-all duration-200 group hover:shadow-modern smooth-transition",
-                activeConversation === conversation.id
-                  ? "bg-accent text-accent-foreground shadow-modern border border-border/50"
-                  : "hover:bg-hover-muted text-foreground"
+                "p-3 rounded-lg cursor-pointer transition-all duration-200 group hover:shadow-modern smooth-transition flex items-center gap-2",
+                isMultiSelect
+                  ? selectedConversationIds.has(conversation.id)
+                    ? "bg-accent text-accent-foreground shadow-modern border border-border/50"
+                    : "hover:bg-hover-muted text-foreground"
+                  : activeConversation === conversation.id
+                    ? "bg-accent text-accent-foreground shadow-modern border border-border/50"
+                    : "hover:bg-hover-muted text-foreground"
               )}
             >
+              {isMultiSelect && (
+                <Checkbox
+                  checked={selectedConversationIds.has(conversation.id)}
+                  onCheckedChange={() => toggleConversationSelect(conversation.id)}
+                  className="flex-shrink-0"
+                  aria-label={`Select ${conversation.title}`}
+                />
+              )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
                   <h3 className="font-medium text-sm truncate">{conversation.title}</h3>
-                  <div className="flex items-center gap-1 flex-shrink-0 ml-2">
+                  {!isMultiSelect && (
+                    <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -674,7 +963,8 @@ const Chat = () => {
                     >
                       <X className="w-3 h-3" />
                     </Button>
-                  </div>
+                    </div>
+                  )}
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
                   {formatDate(conversation.updatedAt)}
@@ -781,6 +1071,34 @@ const Chat = () => {
                         color: message.sender === 'user' ? chatTheme.userText : chatTheme.aiText,
                       }}
                     >
+                      {message.sender === 'user' && message.attachments && message.attachments.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mb-2">
+                          {message.attachments.map(attachment => (
+                            <a
+                              key={attachment.id}
+                              href={attachment.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-2 rounded-lg border border-border/70 bg-foreground/5 hover:bg-foreground/10 px-2.5 py-1.5 text-xs transition-colors max-w-[240px]"
+                              title={attachment.filename}
+                            >
+                              {attachment.mime_type.startsWith('image/') ? (
+                                <img
+                                  src={attachment.url}
+                                  alt={attachment.filename}
+                                  className="w-9 h-9 rounded object-cover flex-shrink-0"
+                                />
+                              ) : (
+                                <FileText className="w-4 h-4 flex-shrink-0" />
+                              )}
+                              <span className="truncate">{attachment.filename}</span>
+                              <span className="text-muted-foreground flex-shrink-0">
+                                {formatFileSize(attachment.size)}
+                              </span>
+                            </a>
+                          ))}
+                        </div>
+                      )}
                       {message.sender === 'ai' ? (
                         <MarkdownMessage content={message.text} />
                       ) : (
@@ -864,62 +1182,110 @@ const Chat = () => {
       {/* Input Area */}
       <div className="p-4 border-t border-border bg-background/95 backdrop-blur-md shadow-elegant">
         <div className="max-w-4xl mx-auto w-full">
-          <div className="flex items-end gap-2 p-2 bg-card/50 backdrop-blur-sm rounded-2xl border border-border shadow-modern hover:shadow-elegant smooth-transition w-full">
-            <div className="relative flex-1 min-w-0">
-              <Textarea
-                ref={textareaRef}
-                placeholder="Message Super AI... (Enter to send, Shift+Enter for new line)"
-                value={newMessage}
-                onChange={(e) => setNewMessage(e.target.value)}
-                onKeyPress={handleKeyPress}
-                aria-label="Message Super AI"
-                className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
-                rows={1}
-              />
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            onChange={handleFileSelect}
+            className="hidden"
+            aria-hidden="true"
+            tabIndex={-1}
+          />
+          <div className="p-2 bg-card/50 backdrop-blur-sm rounded-2xl border border-border shadow-modern hover:shadow-elegant smooth-transition w-full">
+            {pendingAttachments.length > 0 && (
+              <div className="flex flex-wrap gap-2 pb-2">
+                {pendingAttachments.map(attachment => (
+                  <div
+                    key={attachment.id}
+                    className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/40 px-2 py-1.5 text-xs max-w-[260px]"
+                  >
+                    {attachment.mimeType.startsWith('image/') ? (
+                      <img
+                        src={attachment.url}
+                        alt={attachment.name}
+                        className="w-8 h-8 rounded object-cover flex-shrink-0"
+                      />
+                    ) : (
+                      <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                    )}
+                    <span className="truncate">{attachment.name}</span>
+                    <span className="text-muted-foreground flex-shrink-0">
+                      {formatFileSize(attachment.size)}
+                    </span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => removePendingAttachment(attachment.id)}
+                      className="h-5 w-5 p-0 ml-0.5 text-muted-foreground hover:text-destructive hover:bg-transparent"
+                      aria-label={`Remove ${attachment.name}`}
+                      title="Remove file"
+                    >
+                      <X className="w-3 h-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
 
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="absolute bottom-2 left-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
-                aria-label="Attach a file"
-                title="Attach a file"
-              >
-                <Paperclip className="w-4 h-4" />
-              </Button>
+            <div className="flex items-end gap-2">
+              <div className="relative flex-1 min-w-0">
+                <Textarea
+                  ref={textareaRef}
+                  placeholder="Message Super AI... (Enter to send, Shift+Enter for new line)"
+                  value={newMessage}
+                  onChange={(e) => setNewMessage(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  aria-label="Message Super AI"
+                  className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 px-11 py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  rows={1}
+                />
 
-              {!newMessage.trim() && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
-                  onClick={() => setIsVoiceRecording(!isVoiceRecording)}
-                  className={cn(
-                    "absolute bottom-2 right-2 z-10 h-8 w-8 p-0 transition-all duration-200",
-                    isVoiceRecording
-                      ? "text-destructive hover:text-destructive/80 animate-pulse"
-                      : "text-muted-foreground hover:bg-hover-muted hover:text-foreground"
-                  )}
-                  aria-label={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
-                  title={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
+                  onClick={() => fileInputRef.current?.click()}
+                  className="absolute bottom-2 left-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                  aria-label="Attach a file"
+                  title="Attach a file"
                 >
-                  {isVoiceRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  <Paperclip className="w-4 h-4" />
                 </Button>
-              )}
-            </div>
 
-            <div className="flex items-center gap-2 flex-shrink-0">
-              {newMessage.trim() && (
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={isTyping}
-                  size="sm"
-                  className="h-8 w-8 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
-                  style={{ background: 'var(--gradient-primary)' }}
-                >
-                  <Send className="w-4 h-4" />
-                </Button>
-              )}
+                {!newMessage.trim() && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsVoiceRecording(!isVoiceRecording)}
+                    className={cn(
+                      "absolute bottom-2 right-2 z-10 h-8 w-8 p-0 transition-all duration-200",
+                      isVoiceRecording
+                        ? "text-destructive hover:text-destructive/80 animate-pulse"
+                        : "text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                    )}
+                    aria-label={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
+                    title={isVoiceRecording ? 'Stop voice recording' : 'Start voice recording'}
+                  >
+                    {isVoiceRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                  </Button>
+                )}
+              </div>
+
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {(newMessage.trim() || pendingAttachments.length > 0) && (
+                  <Button
+                    onClick={() => handleSendMessage()}
+                    disabled={isTyping}
+                    size="sm"
+                    className="h-8 w-8 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
+                    style={{ background: 'var(--gradient-primary)' }}
+                  >
+                    <Send className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -933,9 +1299,15 @@ const Chat = () => {
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete Chat?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {isMultiSelect && selectedConversationIds.size > 0
+                ? `Delete ${selectedConversationIds.size} Chats?`
+                : 'Delete Chat?'}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this conversation? This action cannot be undone and all messages will be permanently lost.
+              {isMultiSelect && selectedConversationIds.size > 0
+                ? `Are you sure you want to delete ${selectedConversationIds.size} conversations? All messages and any uploaded media files in them will be permanently deleted and cannot be recovered.`
+                : 'Are you sure you want to delete this conversation? All messages and any uploaded media files will be permanently deleted and cannot be recovered.'}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -944,7 +1316,9 @@ const Chat = () => {
               onClick={confirmDelete}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Delete Chat
+              {isMultiSelect && selectedConversationIds.size > 0
+                ? `Delete ${selectedConversationIds.size} Chats`
+                : 'Delete Chat'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
