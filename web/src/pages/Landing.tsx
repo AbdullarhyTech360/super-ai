@@ -1,6 +1,5 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { MessageCircle, Sparkles, Shield, Zap } from 'lucide-react';
-import { logoConcepts } from '@/components/logo-concepts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import Navbar from '@/components/Navbar';
@@ -168,50 +167,6 @@ const Landing = () => {
               </div>
               <h3 className="font-semibold text-foreground mb-2">Multi-platform</h3>
               <p className="text-sm text-muted-foreground">Available on web, mobile, and desktop</p>
-            </div>
-          </div>
-        </div>
-      </section>
-    {/* Logo Concepts Showcase */}
-      <section className="py-16 px-4">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-foreground mb-4">
-              Choose our logo
-            </h2>
-            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-              Five concepts, each carrying its own meaning. View every option side
-              by side and pick the one that becomes the face of Super AI.
-            </p>
-          </div>
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {logoConcepts.map(concept => (
-              <div
-                key={concept.id}
-                className="bg-card rounded-2xl border border-border/60 shadow-modern p-6 flex flex-col items-center text-center hover:shadow-elegant smooth-transition"
-              >
-                <div className="w-28 h-28 rounded-2xl bg-muted/30 flex items-center justify-center mb-5">
-                  {concept.node}
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-primary bg-primary/10 rounded-full px-2.5 py-1">
-                    {concept.label}
-                  </span>
-                  <h3 className="text-lg font-semibold text-foreground">{concept.name}</h3>
-                </div>
-                <p className="text-xs text-primary capitalize mt-1.5">{concept.tagline}</p>
-                <p className="text-sm text-muted-foreground mt-3 leading-relaxed">{concept.meaning}</p>
-              </div>
-            ))}
-
-            <div className="bg-gradient-to-br from-primary to-purple-600 rounded-2xl text-white p-6 flex flex-col items-center justify-center text-center shadow-elegant">
-              <h3 className="text-xl font-bold mb-2">
-                Your pick becomes the face of Super AI
-              </h3>
-              <p className="text-white/85 text-sm">
-                Reply with an option (A–E) and we will apply it everywhere —
-                navbar, login, chat, and the browser tab.
-              </p>
             </div>
           </div>
         </div>
