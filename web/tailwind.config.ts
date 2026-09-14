@@ -142,6 +142,14 @@ export default {
 					'60%, 100%': {
 						color: 'hsl(var(--muted-foreground))'
 					}
+				},
+				'float': {
+					'0%, 100%': {
+						transform: 'translateY(0) translateX(0)'
+					},
+					'50%': {
+						transform: 'translateY(-24px) translateX(12px)'
+					}
 				}
 			},
 			animation: {
@@ -150,7 +158,8 @@ export default {
 				'fade-in': 'fade-in 0.6s ease-out',
 				'slide-in': 'slide-in 0.4s ease-out',
 				'bounce-subtle': 'bounce-subtle 2s ease-in-out infinite',
-				'typing-dots': 'typing-dots 1.4s ease-in-out infinite'
+				'typing-dots': 'typing-dots 1.4s ease-in-out infinite',
+				'float': 'float 10s ease-in-out infinite'
 			}
 		}
 	},

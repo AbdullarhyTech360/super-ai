@@ -1467,121 +1467,105 @@ const Chat = () => {
         )}
         {currentConversation?.messages.length ? (
           <div className="max-w-4xl mx-auto w-full">
-            {currentConversation.messages.map((message, index) => {
-              const showHeader = index === 0 || currentConversation.messages[index - 1].sender !== message.sender;
-
-              return (
+            {currentConversation.messages.map((message, index) => (
                 <div
                   key={message.id}
                   className={cn(
                     "message-enter w-full group",
-                    showHeader ? "mt-6" : "mt-1.5",
-                    index === 0 && "mt-0"
+                    index === 0 ? "mt-0" : "mt-6"
                   )}
                 >
                   <div className={cn(
-                    "max-w-[80%] md:max-w-[70%] w-fit min-w-0",
+                    "max-w-[80%] md:max-w-[70%] w-fit min-w-0 relative",
                     message.sender === 'user' ? "ml-auto" : "mr-auto"
                   )}>
-                    {showHeader && (
-                      <div className={cn(
-                        "mb-1.5 text-xs",
-                        message.sender === 'user' ? "text-right" : "text-left"
-                      )}>
-                        <span className={cn(
-                          "font-semibold",
-                          message.sender === 'user' ? "text-foreground" : "text-muted-foreground"
-                        )}>
-                          {message.sender === 'user' ? 'You' : 'Super AI'}
-                        </span>
-                        <span className="text-muted-foreground">{' · '}
-                          {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                        </span>
-                      </div>
-                    )}
-                    <div
-                      className={cn(
-                        "px-4 py-3 rounded-2xl relative border min-w-0",
-                        message.sender === 'user'
-                          ? "rounded-tr-md"
-                          : "rounded-tl-md"
-                      )}
-                      style={{
-                        background: message.sender === 'user' ? chatTheme.userBg : chatTheme.aiBg,
-                        borderColor: message.sender === 'user' ? chatTheme.userBorder : chatTheme.aiBorder,
-                        color: message.sender === 'user' ? chatTheme.userText : chatTheme.aiText,
-                      }}
-                    >
-                      {message.sender === 'user' && message.attachments && message.attachments.length > 0 && (
-                        <div className="flex flex-wrap gap-2 mb-2">
-                          {message.attachments.map(attachment => (
-                            <a
-                              key={attachment.id}
-                              href={attachment.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="flex items-center gap-2 rounded-lg border border-border/70 bg-foreground/5 hover:bg-foreground/10 px-2.5 py-1.5 text-xs transition-colors max-w-[240px]"
-                              title={attachment.filename}
-                            >
-                              {attachment.mime_type.startsWith('image/') ? (
-                                <img
-                                  src={attachment.url}
-                                  alt={attachment.filename}
-                                  className="w-9 h-9 rounded object-cover flex-shrink-0"
-                                />
-                              ) : (
-                                <FileText className="w-4 h-4 flex-shrink-0" />
-                              )}
-                              <span className="truncate">{attachment.filename}</span>
-                              <span className="text-muted-foreground flex-shrink-0">
-                                {formatFileSize(attachment.size)}
-                              </span>
-                            </a>
-                          ))}
-                        </div>
-                      )}
-                      {message.sender === 'ai' ? (
-                        <MarkdownMessage content={message.text} />
-                      ) : (
-                        <p className="text-sm whitespace-pre-wrap break-words leading-relaxed">
+                    {message.sender === 'user' ? (
+                      <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-3 text-sm text-left shadow-glow min-w-0">
+                        {message.attachments && message.attachments.length > 0 && (
+                          <div className="flex flex-wrap gap-2 mb-2">
+                            {message.attachments.map(attachment => (
+                              <a
+                                key={attachment.id}
+                                href={attachment.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-2 rounded-lg border border-primary-foreground/20 bg-primary-foreground/10 hover:bg-primary-foreground/20 px-2.5 py-1.5 text-xs transition-colors max-w-[240px]"
+                                title={attachment.filename}
+                              >
+                                {attachment.mime_type.startsWith('image/') ? (
+                                  <img
+                                    src={attachment.url}
+                                    alt={attachment.filename}
+                                    className="w-9 h-9 rounded object-cover flex-shrink-0"
+                                  />
+                                ) : (
+                                  <FileText className="w-4 h-4 flex-shrink-0" />
+                                )}
+                                <span className="truncate">{attachment.filename}</span>
+                                <span className="text-primary-foreground/70 flex-shrink-0">
+                                  {formatFileSize(attachment.size)}
+                                </span>
+                              </a>
+                            ))}
+                          </div>
+                        )}
+                        <p className="whitespace-pre-wrap break-words leading-relaxed">
                           {message.text}
                         </p>
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleCopyMessage(message.id, message.text)}
-                        className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
-                        aria-label="Copy message"
-                        title="Copy message"
-                      >
-                        {copiedMessageId === message.id ? (
-                          <Check className="w-3.5 h-3.5" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </Button>
-                    </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyMessage(message.id, message.text)}
+                          className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
+                          aria-label="Copy message"
+                          title="Copy message"
+                        >
+                          {copiedMessageId === message.id ? (
+                            <Check className="w-3.5 h-3.5" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-card-foreground text-left shadow-md min-w-0">
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <AppLogo size={14} className="flex-shrink-0" />
+                          <span className="text-xs font-semibold text-primary">Super AI</span>
+                        </div>
+                        <MarkdownMessage content={message.text} />
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleCopyMessage(message.id, message.text)}
+                          className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
+                          aria-label="Copy message"
+                          title="Copy message"
+                        >
+                          {copiedMessageId === message.id ? (
+                            <Check className="w-3.5 h-3.5" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </div>
-              );
-            })}
+              ))}
 
             {/* Typing Indicator */}
             {isTyping && (
               <div className="max-w-[80%] md:max-w-[70%] w-fit min-w-0 mr-auto animate-slide-in mt-6">
-                <div className="mb-1.5 text-xs text-left">
-                  <span className="font-semibold text-muted-foreground">Super AI</span>
-                  <span className="text-muted-foreground">{' · '}typing</span>
-                </div>
-                <div
-                  className="px-4 py-3 rounded-2xl rounded-tl-md border"
-                  style={{ background: chatTheme.aiBg, borderColor: chatTheme.aiBorder }}
-                >
-                  <div className="flex items-center gap-1">
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                    <div className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 shadow-md">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <AppLogo size={14} className="flex-shrink-0" />
+                    <span className="text-xs font-semibold text-primary">Super AI</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 px-1 pt-1">
+                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" />
+                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" style={{ animationDelay: '150ms' }} />
+                    <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" style={{ animationDelay: '300ms' }} />
                   </div>
                 </div>
               </div>

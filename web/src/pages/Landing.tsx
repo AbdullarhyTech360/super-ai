@@ -1,8 +1,21 @@
 import { Link, useNavigate } from 'react-router-dom';
-import { MessageCircle, Sparkles, Shield, Zap } from 'lucide-react';
+import {
+  ArrowRight,
+  FileText,
+  MessageCircle,
+  MessageCircleQuestion,
+  Mic,
+  Palette,
+  Shield,
+  Sparkles,
+  WandSparkles,
+  Zap,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import Navbar from '@/components/Navbar';
+import AppLogo from '@/components/AppLogo';
 import { useAuth } from '@/hooks/useAuth';
 
 const Landing = () => {
@@ -16,71 +29,176 @@ const Landing = () => {
       navigate('/signup');
     }
   };
+
   const features = [
     {
-      icon: <Sparkles className="w-8 h-8 text-blue-600" />,
+      icon: <Sparkles className="w-6 h-6" />,
       title: "AI-Powered Conversations",
-      description: "Experience intelligent chat with advanced AI that understands context and provides meaningful responses."
+      description: "Intelligent chat that understands context and gives meaningful, human-quality answers."
     },
     {
-      icon: <Shield className="w-8 h-8 text-purple-600" />,
+      icon: <Mic className="w-6 h-6" />,
+      title: "Voice Input",
+      description: "Type it or say it — speak a message and let the AI respond in real time."
+    },
+    {
+      icon: <FileText className="w-6 h-6" />,
+      title: "Files & Markdown",
+      description: "Attach docs and images, and get beautifully formatted code, math, and tables back."
+    },
+    {
+      icon: <Shield className="w-6 h-6" />,
       title: "Secure & Private",
-      description: "Your conversations are encrypted and protected with enterprise-grade security measures."
+      description: "Your conversations stay protected with secure authentication and careful data handling."
     },
     {
-      icon: <Zap className="w-8 h-8 text-green-600" />,
+      icon: <Palette className="w-6 h-6" />,
+      title: "8 Chat Themes",
+      description: "Aurora, Ocean, Midnight and more — style your chat to match your mood."
+    },
+    {
+      icon: <Zap className="w-6 h-6" />,
       title: "Lightning Fast",
-      description: "Real-time messaging with instant responses and seamless synchronization across devices."
+      description: "Streamed responses appear word-by-word, with multi-device sync built in."
+    }
+  ];
+
+  const steps = [
+    {
+      icon: <MessageCircleQuestion className="w-6 h-6" />,
+      title: "Ask anything",
+      description: "Type a question, paste a prompt, or use voice input to kick off a conversation."
+    },
+    {
+      icon: <Zap className="w-6 h-6" />,
+      title: "Get instant answers",
+      description: "Watch responses stream in with clean markdown, code blocks, and math."
+    },
+    {
+      icon: <WandSparkles className="w-6 h-6" />,
+      title: "Do more, faster",
+      description: "Attach files, switch themes, and keep every chat organized in one place."
     }
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-muted/30 to-accent/20"
-         style={{ backgroundImage: 'var(--gradient-hero)' }}>
+    <div className="min-h-screen bg-background text-foreground">
       <Navbar />
-      
+
       {/* Hero Section */}
-      <section className="pt-24 pb-12 px-4">
-        <div className="max-w-6xl mx-auto text-center">
+      <section className="relative overflow-hidden pt-32 pb-20 px-4 bg-gradient-to-b from-background via-muted/20 to-background">
+        <div
+          aria-hidden
+          className="hero-orb w-[42rem] h-[42rem] -top-40 -left-40 opacity-40 animate-float"
+          style={{ background: 'radial-gradient(circle at center, hsl(220 91% 58% / 0.45), transparent 60%)' }}
+        />
+        <div
+          aria-hidden
+          className="hero-orb w-[36rem] h-[36rem] top-0 right-[-10rem] opacity-30 animate-float"
+          style={{ background: 'radial-gradient(circle at center, hsl(260 85% 65% / 0.4), transparent 60%)', animationDuration: '14s' }}
+        />
+        <div
+          aria-hidden
+          className="hero-orb w-[30rem] h-[30rem] -bottom-24 left-1/3 opacity-25 animate-float"
+          style={{ background: 'radial-gradient(circle at center, hsl(220 91% 58% / 0.35), transparent 60%)', animationDelay: '2s', animationDuration: '18s' }}
+        />
+
+        <div className="relative max-w-6xl mx-auto text-center">
           <div className="animate-fade-in">
-            <h1 className="text-5xl md:text-6xl font-bold text-foreground mb-6">
+            <div className="mb-8 flex justify-center">
+              <div className="relative">
+                <div
+                  aria-hidden
+                  className="pointer-events-none absolute -inset-3 rounded-full blur-2xl"
+                  style={{ background: 'radial-gradient(circle at center, hsl(220 91% 58% / 0.4), transparent 70%)' }}
+                />
+                <AppLogo size={96} className="relative animate-float" />
+              </div>
+            </div>
+            <Badge variant="secondary" className="mb-6 gap-2 px-4 py-1.5 text-sm bg-card/70 backdrop-blur-sm hover:bg-card/70">
+              <Sparkles className="w-4 h-4 text-primary" />
+              Powered by Gemini · Voice input · 8 chat themes
+            </Badge>
+
+            <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-foreground mb-6">
               Welcome to{' '}
-              <span className="bg-gradient-to-r from-primary to-purple-600 bg-clip-text text-transparent">
+              <span className="gradient-text">
                 Super AI
               </span>
             </h1>
-            <p className="text-xl text-muted-foreground mb-8 max-w-3xl mx-auto">
-              The next generation of intelligent conversation. Connect, chat, and explore the future of AI-powered communication.
+
+            <p className="text-xl md:text-2xl text-muted-foreground mb-8 max-w-3xl mx-auto">
+              The next generation of intelligent conversation. Ask, create, and explore — with AI that answers instantly.
             </p>
+
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Button onClick={handleStartChatting} size="lg" className="bg-primary text-primary-foreground hover:bg-primary/90 px-8 py-3 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300">
+              <Button
+                onClick={handleStartChatting}
+                size="lg"
+                className="px-8 py-3 text-lg font-semibold shadow-glow hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
+                style={{ background: 'var(--gradient-primary)' }}
+              >
                 <MessageCircle className="w-5 h-5 mr-2" />
                 Start Chatting
+                <ArrowRight className="w-4 h-4 ml-2 text-primary-foreground/70" />
               </Button>
               <Link to="/login">
-                <Button variant="outline" size="lg" className="px-8 py-3 text-lg border-2 border-border hover:bg-accent hover:text-accent-foreground font-semibold transition-all duration-300">
+                <Button
+                  variant="outline"
+                  size="lg"
+                  className="px-8 py-3 text-lg border-2 border-border hover:bg-accent hover:text-accent-foreground font-semibold hover:-translate-y-0.5 transition-all duration-300"
+                >
                   Sign In
                 </Button>
               </Link>
             </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 text-sm text-muted-foreground">
+              <span className="inline-flex items-center gap-1.5">
+                <Zap className="w-4 h-4 text-primary" />
+                Streamed answers
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Shield className="w-4 h-4 text-primary" />
+                Secure by default
+              </span>
+              <span className="inline-flex items-center gap-1.5">
+                <Palette className="w-4 h-4 text-primary" />
+                Themeable chat
+              </span>
+            </div>
           </div>
-          
-          {/* Hero Image Placeholder */}
-          <div className="mt-16 animate-fade-in">
-            <div className="relative mx-auto max-w-4xl">
-              <div className="bg-gradient-to-r from-muted/50 to-accent/50 rounded-2xl p-8 shadow-xl border border-border/50">
-                <div className="bg-card rounded-xl p-6 shadow-lg border border-border">
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-3 h-3 bg-red-400 rounded-full"></div>
-                    <div className="w-3 h-3 bg-yellow-400 rounded-full"></div>
-                    <div className="w-3 h-3 bg-green-400 rounded-full"></div>
+
+          {/* Chat Mockup */}
+          <div className="mt-16 max-w-4xl mx-auto animate-fade-in" style={{ animationDelay: '200ms' }}>
+            <div className="relative rounded-2xl border border-border/60 bg-card/70 backdrop-blur-sm shadow-modern-lg p-3">
+              <div className="flex items-center justify-between px-2 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="w-3 h-3 rounded-full bg-red-400/80" />
+                  <span className="w-3 h-3 rounded-full bg-yellow-400/80" />
+                  <span className="w-3 h-3 rounded-full bg-green-400/80" />
+                </div>
+                <div className="px-3 py-1 rounded-full bg-muted text-muted-foreground text-xs font-medium">
+                  superai.chat
+                </div>
+              </div>
+              <div className="rounded-xl border border-border/50 bg-gradient-to-br from-secondary/60 to-background p-6 space-y-4">
+                <div className="max-w-[70%] ml-auto bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-2.5 text-sm text-left shadow-glow">
+                  Help me plan my week as a full-stack developer 🚀
+                </div>
+
+                <div className="max-w-[80%] bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-card-foreground text-left shadow-md">
+                  <div className="flex items-center gap-1.5 mb-1.5">
+                    <AppLogo size={14} className="flex-shrink-0" />
+                    <span className="text-xs font-semibold text-primary">Super AI</span>
                   </div>
-                  <div className="space-y-3">
-                    <div className="h-4 bg-muted rounded w-3/4"></div>
-                    <div className="h-4 bg-primary/20 rounded w-1/2 ml-auto"></div>
-                    <div className="h-4 bg-muted rounded w-2/3"></div>
-                    <div className="h-4 bg-purple-500/20 rounded w-3/5 ml-auto"></div>
-                  </div>
+                  Here's a focused weekly plan: block **deep work** for mornings, reserve one day for **code reviews**, and batch meetings on Friday. Want a day-by-day breakdown?
+                </div>
+
+                <div className="flex items-center gap-1.5 px-1 pt-1">
+                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" />
+                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" style={{ animationDelay: '150ms' }} />
+                  <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" style={{ animationDelay: '300ms' }} />
                 </div>
               </div>
             </div>
@@ -89,28 +207,36 @@ const Landing = () => {
       </section>
 
       {/* Features Section */}
-      <section className="py-16 px-4">
+      <section className="py-20 px-4">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold text-foreground mb-4">
-              Why Choose Super AI?
+          <div className="text-center mb-14">
+            <Badge variant="secondary" className="mb-4 px-4 py-1">Why Super AI?</Badge>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
+              Everything you need to{' '}
+              <span className="gradient-text">chat smarter</span>
             </h2>
-            <p className="text-lg text-muted-foreground">
-              Discover the features that make our chat platform extraordinary
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+              Discover the features that make Super AI more than just a chatbot.
             </p>
           </div>
-          
-          <div className="grid md:grid-cols-3 gap-8">
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {features.map((feature, index) => (
-              <Card key={index} className="hover:shadow-lg transition-all duration-300 border border-border/50 hover:border-primary/30 shadow-md bg-card/80 backdrop-blur-sm">
-                <CardContent className="p-6 text-center">
-                  <div className="flex justify-center mb-4">
+              <Card
+                key={index}
+                className="group modern-card hover:-translate-y-1 hover:border-primary/30"
+              >
+                <CardContent className="p-6">
+                  <div
+                    className="mb-5 w-12 h-12 rounded-xl flex items-center justify-center text-primary-foreground shadow-glow transition-transform duration-300 group-hover:scale-110"
+                    style={{ background: 'var(--gradient-primary)' }}
+                  >
                     {feature.icon}
                   </div>
-                  <h3 className="text-xl font-semibold text-card-foreground mb-3">
+                  <h3 className="text-lg font-semibold text-card-foreground mb-2">
                     {feature.title}
                   </h3>
-                  <p className="text-muted-foreground">
+                  <p className="text-sm text-muted-foreground leading-relaxed">
                     {feature.description}
                   </p>
                 </CardContent>
@@ -120,54 +246,82 @@ const Landing = () => {
         </div>
       </section>
 
-      {/* CTA Section */}
-      <section className="py-16 px-4 bg-gradient-to-r from-primary to-purple-600 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-primary/90 to-purple-600/90"></div>
-        <div className="max-w-4xl mx-auto text-center relative z-10">
-          <h2 className="text-3xl font-bold text-white mb-4">
-            Ready to Experience the Future of Chat?
-          </h2>
-          <p className="text-xl text-white/80 mb-8">
-            Join thousands of users already enjoying Super AI conversations
-          </p>
-          <Button onClick={handleStartChatting} size="lg" variant="secondary" className="px-8 py-3 text-lg bg-white text-primary hover:bg-white/90 font-semibold shadow-lg">
-            Get Started Now
-          </Button>
+      {/* How It Works Section */}
+      <section className="py-20 px-4 bg-muted/30">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-14">
+            <Badge variant="secondary" className="mb-4 px-4 py-1">How it works</Badge>
+            <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-4">
+              From question to answer in{' '}
+              <span className="gradient-text">three steps</span>
+            </h2>
+            <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
+              No setup, no learning curve — just start a conversation.
+            </p>
+          </div>
+
+          <div className="relative grid md:grid-cols-3 gap-10">
+            <div
+              aria-hidden
+              className="hidden md:block absolute top-8 left-[16.66%] right-[16.66%] border-t-2 border-dashed border-primary/30"
+            />
+            {steps.map((step, index) => (
+              <div key={index} className="relative text-center">
+                <div
+                  className="mx-auto mb-5 w-16 h-16 rounded-2xl flex items-center justify-center text-primary-foreground relative shadow-glow"
+                  style={{ background: 'var(--gradient-primary)' }}
+                >
+                  {step.icon}
+                  <span className="absolute -top-2 -right-2 w-7 h-7 rounded-full bg-card border border-border text-xs font-bold text-primary flex items-center justify-center shadow-modern">
+                    {String(index + 1).padStart(2, '0')}
+                  </span>
+                </div>
+                <h3 className="text-xl font-semibold text-foreground mb-2">
+                  {step.title}
+                </h3>
+                <p className="text-muted-foreground max-w-xs mx-auto">
+                  {step.description}
+                </p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* Additional Features Section */}
-      <section className="py-16 px-4 bg-muted/20">
-        <div className="max-w-6xl mx-auto">
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="text-center p-6">
-              <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Shield className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">End-to-End Encryption</h3>
-              <p className="text-sm text-muted-foreground">Your conversations are always private and secure</p>
-            </div>
-            <div className="text-center p-6">
-              <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Zap className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Real-time Sync</h3>
-              <p className="text-sm text-muted-foreground">Seamless experience across all your devices</p>
-            </div>
-            <div className="text-center p-6">
-              <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <Sparkles className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Smart Suggestions</h3>
-              <p className="text-sm text-muted-foreground">AI-powered conversation assistance</p>
-            </div>
-            <div className="text-center p-6">
-              <div className="w-12 h-12 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
-                <MessageCircle className="w-6 h-6 text-primary" />
-              </div>
-              <h3 className="font-semibold text-foreground mb-2">Multi-platform</h3>
-              <p className="text-sm text-muted-foreground">Available on web, mobile, and desktop</p>
-            </div>
+      {/* CTA Section */}
+      <section className="py-20 px-4">
+        <div
+          className="max-w-5xl mx-auto relative overflow-hidden rounded-3xl px-6 py-16 text-center shadow-modern-lg"
+          style={{ background: 'var(--gradient-primary)' }}
+        >
+          <div
+            aria-hidden
+            className="hero-orb w-80 h-80 -top-24 -right-24 opacity-30 animate-float"
+            style={{ background: 'radial-gradient(circle at center, hsl(0 0% 100% / 0.5), transparent 60%)' }}
+          />
+          <div
+            aria-hidden
+            className="hero-orb w-72 h-72 -bottom-28 -left-20 opacity-25 animate-float"
+            style={{ background: 'radial-gradient(circle at center, hsl(260 85% 65% / 0.6), transparent 60%)', animationDelay: '3s', animationDuration: '16s' }}
+          />
+
+          <Sparkles className="relative z-10 w-10 h-10 mx-auto mb-6 text-white/90" />
+          <h2 className="relative z-10 text-3xl md:text-4xl font-bold text-white mb-4">
+            Ready to experience the future of chat?
+          </h2>
+          <p className="relative z-10 text-xl text-white/85 mb-8">
+            Join users already enjoying Super AI conversations.
+          </p>
+          <div className="relative z-10">
+            <Button
+              onClick={handleStartChatting}
+              size="lg"
+              variant="secondary"
+              className="px-8 py-3 text-lg bg-white text-primary hover:bg-white/90 font-semibold shadow-lg hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
+            >
+              Get Started Now
+              <ArrowRight className="w-5 h-5 ml-2" />
+            </Button>
           </div>
         </div>
       </section>
