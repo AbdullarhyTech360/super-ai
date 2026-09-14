@@ -151,6 +151,49 @@ def save_upload(user_id: str, upload: UploadFile) -> tuple[str, str, str, str, i
     return attachment_id, generated_name, filename, mime_type, size
 
 
+def save_image_upload(
+    user_id: str, upload: UploadFile, folder: str = "avatars"
+) -> tuple[str, str, str, int]:
+    """Validate and persist an image file.
+
+    Returns (stored_relative_path, filename, mime_type, size). Only image
+    mime types are allowed.
+    """
+    mime_type = (upload.content_type or "").lower()
+    filename = upload.filename or ""
+
+    if mime_type in ("application/octet-stream", ""):
+        extension = Path(filename).suffix.lower()
+        mime_type = MIME_BY_EXTENSION.get(extension, "")
+    if mime_type not in IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid image type. Use JPEG, PNG, WebP, GIF, SVG, BMP, or HEIC.",
+        )
+
+    generated_name = f"{str(generate_uuid())}{mime_extension(mime_type)}"
+    user_folder = UPLOADS_DIR / user_id / folder
+    user_folder.mkdir(parents=True, exist_ok=True)
+    target = user_folder / generated_name
+
+    size = 0
+    with target.open("wb") as out:
+        while chunk := upload.file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_FILE_SIZE:
+                out.close()
+                target.unlink(missing_ok=True)
+                raise HTTPException(
+                    status_code=413,
+                    detail="Image is too large. Maximum allowed size is 25 MB.",
+                )
+            out.write(chunk)
+
+    if not filename:
+        filename = generated_name
+    return f"{folder}/{generated_name}", filename, mime_type, size
+
+
 def attachment_url(user_id: str, generated_name: str) -> str:
     return f"/uploads/{user_id}/{generated_name}"
 

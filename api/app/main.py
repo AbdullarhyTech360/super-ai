@@ -16,15 +16,19 @@ from app.db.database import create_db_and_tables
 from app.models.user import User
 from app.models.forms import SignUp, Login
 from app.schemas.conversation_role import Rename_request, ConversationBulkDeleteRequest
+from app.schemas.user import ChangePasswordRequest, ProfileUpdate
 from app.services.conversation_ai import send_message_stream, send_message_stream_with_title
 from app.services.uploads import (
+    IMAGE_TYPES,
     UPLOADS_DIR,
     attachment_url,
     build_ai_parts,
+    save_image_upload,
     save_upload,
 )
 
 import os
+import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -147,6 +151,142 @@ def get_current_user_info(
         "id": current_user.id,
         "email": current_user.email,
         "full_name": current_user.full_name,
+        "avatar_url": (
+            attachment_url(current_user.id, current_user.avatar_path)
+            if current_user.avatar_path
+            else None
+        ),
+    }
+
+@app.put("/api/me")
+def update_current_user_info(
+    profile_update: ProfileUpdate,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    full_name = " ".join(profile_update.full_name.split())
+    if not full_name:
+        raise HTTPException(status_code=400, detail="Name cannot be empty.")
+
+    current_user.full_name = full_name
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return {
+        "id": current_user.id,
+        "email": current_user.email,
+        "full_name": current_user.full_name,
+        "avatar_url": (
+            attachment_url(current_user.id, current_user.avatar_path)
+            if current_user.avatar_path
+            else None
+        ),
+    }
+
+@app.post("/api/me/avatar")
+def upload_current_user_avatar(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+    file: UploadFile = File(...),
+):
+    mime_type = (file.content_type or "").lower()
+    if mime_type not in IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload a valid image (JPEG, PNG, WebP, GIF, SVG, BMP, or HEIC).",
+        )
+
+    avatar_path, _, _, _ = save_image_upload(current_user.id, file)
+    old_path = current_user.avatar_path
+    current_user.avatar_path = avatar_path
+    session.add(current_user)
+    session.commit()
+
+    if old_path:
+        (UPLOADS_DIR / current_user.id / old_path).unlink(missing_ok=True)
+
+    return {"avatar_url": attachment_url(current_user.id, avatar_path)}
+
+@app.post("/api/change-password")
+def change_current_user_password(
+    change_request: ChangePasswordRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    if not verify_password(change_request.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="Current password is incorrect.")
+
+    new_password = change_request.new_password
+    if len(new_password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be at least 6 characters long.",
+        )
+
+    current_user.hashed_password = password_hash.hash(new_password)
+    session.add(current_user)
+    session.commit()
+    return {"message": "Password updated successfully."}
+
+@app.get("/api/export")
+def export_current_user_data(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    from app.models.chat import Attachment, Conversation, Message
+
+    conversations = (
+        session.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .all()
+    )
+    conversation_data = []
+    for conversation in conversations:
+        messages = (
+            session.query(Message)
+            .filter(Message.conversation_id == conversation.id)
+            .order_by(Message.created_at)
+            .all()
+        )
+        message_data = []
+        for message in messages:
+            message_data.append({
+                "id": message.id,
+                "text": message.text,
+                "sender": message.sender,
+                "created_at": message.created_at,
+                "attachments": [
+                    {
+                        "id": attachment.id,
+                        "filename": attachment.filename,
+                        "mime_type": attachment.mime_type,
+                        "size": attachment.size,
+                        "url": attachment_url(current_user.id, attachment.stored_path),
+                    }
+                    for attachment in message.attachments
+                ],
+            })
+        conversation_data.append({
+            "id": conversation.id,
+            "title": conversation.title,
+            "created_at": messages[0].created_at if messages else conversation.updated_at,
+            "updated_at": conversation.updated_at,
+            "messages": message_data,
+        })
+
+    return {
+        "user": {
+            "id": current_user.id,
+            "email": current_user.email,
+            "full_name": current_user.full_name,
+            "avatar_url": (
+                attachment_url(current_user.id, current_user.avatar_path)
+                if current_user.avatar_path
+                else None
+            ),
+        },
+        "exported_at": datetime.now(timezone.utc),
+        "conversations": conversation_data,
     }
 
 @app.post("/api/chat")
@@ -156,6 +296,8 @@ def chat_with_ai(
     input: Annotated[str, Form()] = "",
     is_new: Annotated[bool, Form()] = True,
     conversation_id: Annotated[str | None, Form()] = None,
+    persist: Annotated[bool, Form()] = True,
+    history: Annotated[str, Form()] = "",
     files: Annotated[list[UploadFile], File()] = [],
 ):
     from app.models.chat import Attachment, Conversation, Message
@@ -176,29 +318,55 @@ def chat_with_ai(
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
     if is_new or conversation_id is None:
-        new_conversation = Conversation(
-            user_id=current_user.id,
-            title=input_text[:50],
-        )
-        session.add(new_conversation)
-        session.commit()
-        session.refresh(new_conversation)
-        conversation = new_conversation
+        if persist:
+            new_conversation = Conversation(
+                user_id=current_user.id,
+                title=input_text[:50],
+            )
+            session.add(new_conversation)
+            session.commit()
+            session.refresh(new_conversation)
+            conversation = new_conversation
+        else:
+            conversation = None
     else:
         conversation = session.get(Conversation, conversation_id)
-        if conversation is None or conversation.user_id != current_user.id:
+        if conversation is None:
+            if persist:
+                for upload in files:
+                    upload.file.close()
+                raise HTTPException(status_code=404, detail="Conversation not found")
+        elif conversation.user_id != current_user.id:
             for upload in files:
                 upload.file.close()
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-    history = [
-        (message.sender, message.text)
-        for message in session.query(Message)
-        .filter(Message.conversation_id == conversation.id)
-        .order_by(Message.created_at)
-        .all()
-    ]
-    conversation_id = conversation.id
+    history_list: list[tuple[str, str]] = []
+    if conversation is not None:
+        history_list = [
+            (message.sender, message.text)
+            for message in session.query(Message)
+            .filter(Message.conversation_id == conversation.id)
+            .order_by(Message.created_at)
+            .all()
+        ]
+    elif history.strip():
+        try:
+            parsed_history = json.loads(history)
+            history_list = [
+                (item.get("sender", ""), item.get("text", ""))
+                for item in parsed_history
+                if isinstance(item, dict)
+            ][-40:]
+        except (ValueError, TypeError):
+            history_list = []
+
+    if conversation is not None:
+        response_conversation_id = conversation.id
+    elif conversation_id is not None:
+        response_conversation_id = conversation_id
+    else:
+        response_conversation_id = f"tmp-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
 
     attachment_meta = [
         {
@@ -228,57 +396,64 @@ def chat_with_ai(
 
         yield json.dumps({
             "type": "start",
-            "conversation_id": conversation_id,
+            "conversation_id": response_conversation_id,
             "title": fallback_title if is_new or conversation_id is None else None,
             "attachments": start_attachments,
         }) + "\n"
 
         response_parts = []
         if is_new or conversation_id is None:
-            stream = send_message_stream_with_title(input_text, history, ai_parts)
-            title = ""
-            for event_type, value in stream:
-                if event_type == "title":
-                    title = " ".join(value.split())[:50].strip()
-                    if not title:
-                        title = input_text[:50]
-                    conversation.title = title
-                    session.add(conversation)
-                    session.commit()
-                    yield json.dumps({"type": "title", "title": title}) + "\n"
-                else:
-                    response_parts.append(value)
-                    yield json.dumps({"type": "chunk", "text": value}) + "\n"
+            if persist and conversation is not None:
+                stream = send_message_stream_with_title(input_text, history_list, ai_parts)
+                title = ""
+                for event_type, value in stream:
+                    if event_type == "title":
+                        title = " ".join(value.split())[:50].strip()
+                        if not title:
+                            title = input_text[:50]
+                        conversation.title = title
+                        session.add(conversation)
+                        session.commit()
+                        yield json.dumps({"type": "title", "title": title}) + "\n"
+                    else:
+                        response_parts.append(value)
+                        yield json.dumps({"type": "chunk", "text": value}) + "\n"
+            else:
+                for chunk in send_message_stream(input_text, history_list, ai_parts):
+                    response_parts.append(chunk)
+                    yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
         else:
-            for chunk in send_message_stream(input_text, history, ai_parts):
+            for chunk in send_message_stream(input_text, history_list, ai_parts):
                 response_parts.append(chunk)
                 yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
 
         response = "".join(response_parts)
-        user_message = Message(
-            conversation_id=conversation_id,
-            text=input_text,
-            sender="user",
-        )
-        session.add(user_message)
-        session.commit()
-        session.refresh(user_message)
 
-        for meta in attachment_meta:
-            session.add(Attachment(
-                message_id=user_message.id,
-                filename=meta["filename"],
-                mime_type=meta["mime_type"],
-                size=meta["size"],
-                stored_path=meta["generated_name"],
-            ))
+        if persist and conversation is not None:
+            user_message = Message(
+                conversation_id=conversation.id,
+                text=input_text,
+                sender="user",
+            )
+            session.add(user_message)
+            session.commit()
+            session.refresh(user_message)
 
-        session.add_all([
-            Message(conversation_id=conversation_id, text=response, sender="ai"),
-        ])
-        conversation.updated_at = datetime.now(timezone.utc)
-        session.add(conversation)
-        session.commit()
+            for meta in attachment_meta:
+                session.add(Attachment(
+                    message_id=user_message.id,
+                    filename=meta["filename"],
+                    mime_type=meta["mime_type"],
+                    size=meta["size"],
+                    stored_path=meta["generated_name"],
+                ))
+
+            session.add_all([
+                Message(conversation_id=conversation.id, text=response, sender="ai"),
+            ])
+            conversation.updated_at = datetime.now(timezone.utc)
+            session.add(conversation)
+            session.commit()
         yield json.dumps({"type": "done"}) + "\n"
 
     return StreamingResponse(

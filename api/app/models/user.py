@@ -6,3 +6,4 @@ class User(SQLModel, table=True):
     full_name: str
     email: str = Field(index=True, unique=True)
     hashed_password: str
+    avatar_path: str | None = None

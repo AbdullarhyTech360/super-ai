@@ -17,7 +17,7 @@ const Help = () => {
     },
     {
       question: "Can I save my conversations?",
-      answer: "Yes! All your conversations are automatically saved. You can enable auto-save in Settings > General > Auto-save Conversations to ensure nothing is lost."
+      answer: "Yes! Conversations are saved automatically by default. For chats you don't want to keep, tap the temporary-chat button next to the conversation title — that chat won't be saved and can't be retrieved after you close it."
     },
     {
       question: "How do I change my profile settings?",

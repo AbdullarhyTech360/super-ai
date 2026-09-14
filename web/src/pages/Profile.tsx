@@ -1,16 +1,18 @@
 import { useEffect, useState } from 'react';
 import { User, Mail, Award, MessageCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import SidebarShell from '@/components/SidebarShell';
 import { useAuth } from '@/hooks/useAuth';
+import { resolveAssetUrl } from '@/lib/api';
 
 interface ProfileUser {
   id: string;
   full_name: string;
   email: string;
+  avatar_url?: string | null;
 }
 
 interface ProfileMessage {
@@ -116,6 +118,7 @@ const Profile = () => {
               <div className="flex flex-col sm:flex-row items-center gap-6">
                 <div className="relative">
                   <Avatar className="w-24 h-24 sm:w-32 sm:h-32">
+                    {user.avatar_url && <AvatarImage src={resolveAssetUrl(user.avatar_url) ?? ''} alt={displayName} />}
                     <AvatarFallback 
                       style={{ background: 'var(--gradient-primary)' }}
                       className="text-white text-2xl sm:text-3xl"

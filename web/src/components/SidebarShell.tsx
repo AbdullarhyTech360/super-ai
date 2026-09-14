@@ -5,7 +5,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip
 import { useTheme } from '@/hooks/useTheme';
 import { useAuth } from '@/hooks/useAuth';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
+import { resolveAssetUrl } from '@/lib/api';
 import AppLogo from './AppLogo';
 import AboutDeveloper from './AboutDeveloper';
 
@@ -63,7 +64,7 @@ const SidebarShell = ({
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
-  const [userInfo, setUserInfo] = useState<{ full_name: string; email: string } | null>(null);
+  const [userInfo, setUserInfo] = useState<{ full_name: string; email: string; avatar_url?: string | null } | null>(null);
 
   const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const handleThemeChange = (checked: boolean) => setTheme(checked ? 'dark' : 'light');
@@ -75,6 +76,8 @@ const SidebarShell = ({
     .join('')
     .slice(0, 2)
     .toUpperCase();
+
+  const userAvatarSrc = resolveAssetUrl(userInfo?.avatar_url);
 
   const handleLogout = () => {
     logout();
@@ -100,7 +103,7 @@ const SidebarShell = ({
           },
         });
         if (!response.ok) throw new Error('Failed to fetch user info');
-        const data = (await response.json()) as { full_name: string; email: string };
+        const data = (await response.json()) as { full_name: string; email: string; avatar_url?: string | null };
         setUserInfo(data);
       } catch (error) {
         console.error('Error fetching user info:', error);
@@ -342,6 +345,7 @@ const SidebarShell = ({
                   aria-label="Account"
                 >
                   <Avatar className="h-8 w-8">
+                    {userAvatarSrc && <AvatarImage src={userAvatarSrc} alt={userInfo?.full_name ?? 'User'} />}
                     <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-xs font-semibold">
                       {userInitials}
                     </AvatarFallback>
@@ -351,6 +355,7 @@ const SidebarShell = ({
               <DropdownMenuContent align="end" className="w-64">
                 <div className="px-2 py-2 flex items-center gap-3">
                   <Avatar className="h-10 w-10">
+                    {userAvatarSrc && <AvatarImage src={userAvatarSrc} alt={userInfo?.full_name ?? 'User'} />}
                     <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-sm font-semibold">
                       {userInitials}
                     </AvatarFallback>

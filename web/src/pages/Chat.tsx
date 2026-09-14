@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Plus, Search, X, Paperclip, Mic, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2, Smile, Pause, Play } from 'lucide-react';
+import { Send, Plus, Search, X, Paperclip, Mic, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2, Smile, Pause, Play, MessageSquareDashed } from 'lucide-react';
 import EmojiPicker, { type EmojiClickData, Theme as EmojiTheme } from 'emoji-picker-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ import AppLogo from '@/components/AppLogo';
 import SidebarShell from '@/components/SidebarShell';
 import { CHAT_THEMES, getChatTheme, type ChatTheme } from '@/lib/chatThemes';
 import { Checkbox } from '@/components/ui/checkbox';
+import { isNotificationsEnabled, playNotificationSound, tryNotify } from '@/lib/notifications';
 
 interface Message {
   id: string;
@@ -69,6 +70,7 @@ interface Conversation {
   messages: Message[];
   createdAt: Date;
   updatedAt: Date;
+  isTemporary?: boolean;
 }
 
 interface MessageDto {
@@ -223,11 +225,13 @@ const Chat = () => {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editingTitle, setEditingTitle] = useState('');
+  const [pendingTemporary, setPendingTemporary] = useState(false);
   const [userInfo, setUserInfo] = useState<{ full_name: string; email: string } | null>(null);
   const [chatTheme, setChatTheme] = useState<ChatTheme>(
     () => getChatTheme(localStorage.getItem('chatTheme'))
   );
   const isInitialActiveConversation = useRef(true);
+  const conversationsRef = useRef<Conversation[]>(conversations);
   const streamQueueRef = useRef<string[]>([]);
   const streamDisplayTextRef = useRef('');
   const streamConversationIdRef = useRef<string | null>(null);
@@ -265,14 +269,42 @@ const Chat = () => {
     }
   }, [toast]);
 
+  const dropTemporaryConversations = (exceptId?: string) => {
+    setConversations(prev => {
+      for (const conv of prev) {
+        if (conv.isTemporary && conv.id !== exceptId) {
+          conv.messages.forEach(message => message.attachments?.forEach(attachment => URL.revokeObjectURL(attachment.url)));
+        }
+      }
+      return prev.filter(conv => !(conv.isTemporary && conv.id !== exceptId));
+    });
+  };
+
   const handleNewChat = () => {
     setActiveConversation(null);
     setNewMessage('');
     pendingAttachments.forEach(attachment => URL.revokeObjectURL(attachment.url));
     setPendingAttachments([]);
+    setPendingTemporary(false);
+    dropTemporaryConversations();
     requestAnimationFrame(() => {
       textareaRef.current?.focus();
     });
+  };
+
+  const handleTemporaryChat = () => {
+    handleNewChat();
+    setPendingTemporary(true);
+    toast({
+      title: 'Temporary chat',
+      description: "This conversation won't be saved and can't be retrieved after you close it.",
+    });
+  };
+
+  const handleSelectConversation = (id: string) => {
+    setPendingTemporary(false);
+    dropTemporaryConversations(id);
+    setActiveConversation(id);
   };
 
   const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -698,6 +730,10 @@ const Chat = () => {
     }
   }, [activeConversation]);
 
+  useEffect(() => {
+    conversationsRef.current = conversations;
+  }, [conversations]);
+
   const formatDate = (date: Date) => {
     const now = new Date();
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -918,6 +954,14 @@ const Chat = () => {
 
     const localConversationId = activeConversation ?? Date.now().toString();
 
+    const isTemporaryChat = activeConversation
+      ? (conversationsRef.current.find(conv => conv.id === activeConversation)?.isTemporary ?? false)
+      : pendingTemporary;
+
+    const sendingHistory = conversationsRef.current
+      .find(conv => conv.id === activeConversation)
+      ?.messages.map(m => ({ sender: m.sender, text: m.text })) ?? [];
+
     const message: Message = {
       id: Date.now().toString(),
       text,
@@ -944,10 +988,12 @@ const Chat = () => {
         title: 'Generating title...',
         messages: [message],
         createdAt: new Date(),
-        updatedAt: new Date()
+        updatedAt: new Date(),
+        isTemporary: pendingTemporary
       };
       setConversations(prev => [newConv, ...prev]);
       setActiveConversation(newConv.id);
+      setPendingTemporary(false);
     }
 
     setNewMessage('');
@@ -962,11 +1008,24 @@ const Chat = () => {
       streamConversationIdRef.current = responseConversationId;
       streamMessageIdRef.current = `ai-${Date.now()}`;
       streamDoneRef.current = false;
+      let notificationTitle = conversationsRef.current.find(conv => conv.id === (activeConversation ?? localConversationId))?.title || 'Super AI';
+
+      const onStreamDone = () => {
+        if (isNotificationsEnabled() && document.visibilityState === 'hidden') {
+          tryNotify(notificationTitle, streamDisplayTextRef.current.trim().slice(0, 140));
+        }
+        playNotificationSound();
+      };
+
       try {
         const accessToken = localStorage.getItem('access_token');
         const formData = new FormData();
         formData.append('input', text);
         formData.append('is_new', String(!activeConversation));
+        formData.append('persist', String(!isTemporaryChat));
+        if (isTemporaryChat && sendingHistory.length > 0) {
+          formData.append('history', JSON.stringify(sendingHistory));
+        }
         if (activeConversation) {
           formData.append('conversation_id', activeConversation);
         }
@@ -1031,6 +1090,7 @@ const Chat = () => {
               ));
               sentAttachments.forEach(attachment => URL.revokeObjectURL(attachment.url));
             } else if (event.type === 'title') {
+              notificationTitle = event.title;
               setConversations(prev => prev.map(conv =>
                 conv.id === responseConversationId || conv.id === localConversationId
                   ? { ...conv, title: event.title }
@@ -1041,6 +1101,7 @@ const Chat = () => {
             } else if (event.type === 'done') {
               streamFinished = true;
               streamDoneRef.current = true;
+              onStreamDone();
             }
           }
 
@@ -1053,6 +1114,7 @@ const Chat = () => {
             enqueueStreamText(event.text);
           } else if (event.type === 'done') {
             streamDoneRef.current = true;
+            onStreamDone();
           }
         }
 
@@ -1071,7 +1133,7 @@ const Chat = () => {
         return;
       }
     })();
-  }, [newMessage, activeConversation, pendingAttachments, authenticatedFetch, toast]);
+  }, [newMessage, activeConversation, pendingAttachments, pendingTemporary, authenticatedFetch, toast]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
@@ -1162,14 +1224,33 @@ const Chat = () => {
       }
       sidebarHeaderExtra={
         <>
-          <Button
-            onClick={handleNewChat}
-            className="w-full mb-4 smooth-transition hover:shadow-glow"
-            style={{ background: 'var(--gradient-primary)' }}
-          >
-            <Plus className="w-4 h-4 mr-2" />
-            New Chat
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={handleNewChat}
+              className="flex-1 mb-1 smooth-transition hover:shadow-glow"
+              style={{ background: 'var(--gradient-primary)' }}
+            >
+              <Plus className="w-4 h-4 mr-2" />
+              New Chat
+            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleTemporaryChat}
+                  className="h-9 w-9 p-0 mb-1 text-muted-foreground hover:text-foreground smooth-transition"
+                  aria-label="Start a temporary chat"
+                >
+                  <MessageSquareDashed className="w-4 h-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent side="right">
+                Start a temporary chat — it won't be saved and can't be retrieved after you close it.
+              </TooltipContent>
+            </Tooltip>
+          </div>
 
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
@@ -1261,7 +1342,7 @@ const Chat = () => {
               key={conversation.id}
               onClick={() => isMultiSelect
                 ? toggleConversationSelect(conversation.id)
-                : setActiveConversation(conversation.id)}
+                : handleSelectConversation(conversation.id)}
               className={cn(
                 "p-3 rounded-lg cursor-pointer transition-all duration-200 group hover:shadow-modern smooth-transition flex items-center gap-2",
                 isMultiSelect
@@ -1283,7 +1364,12 @@ const Chat = () => {
               )}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between">
-                  <h3 className="font-medium text-sm truncate">{conversation.title}</h3>
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    {conversation.isTemporary && (
+                      <MessageSquareDashed className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" aria-label="Temporary chat" />
+                    )}
+                    <h3 className="font-medium text-sm truncate">{conversation.title}</h3>
+                  </div>
                   {!isMultiSelect && (
                     <div className="flex items-center gap-1 flex-shrink-0 ml-2">
                     <Button
@@ -1371,6 +1457,14 @@ const Chat = () => {
         style={{ background: chatTheme.areaBg }}
       >
         <ScrollArea className="h-full p-4 bg-transparent overflow-x-hidden">
+        {currentConversation?.isTemporary && (
+          <div className="max-w-4xl mx-auto w-full mb-3">
+            <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/5 text-sm text-foreground">
+              <MessageSquareDashed className="w-4 h-4 text-primary flex-shrink-0" />
+              <span>Temporary chat — this conversation won't be saved and can't be retrieved after you close it.</span>
+            </div>
+          </div>
+        )}
         {currentConversation?.messages.length ? (
           <div className="max-w-4xl mx-auto w-full">
             {currentConversation.messages.map((message, index) => {
