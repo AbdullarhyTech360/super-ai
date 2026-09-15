@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Plus, Search, X, Paperclip, Mic, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2, Smile, Pause, Play, MessageSquareDashed } from 'lucide-react';
+import { Send, Plus, Search, X, Paperclip, Mic, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2, Smile, Pause, Play, MessageSquareDashed, MoreHorizontal } from 'lucide-react';
 import EmojiPicker, { type EmojiClickData, Theme as EmojiTheme } from 'emoji-picker-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -10,12 +10,10 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -34,6 +32,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { useTheme } from '@/hooks/useTheme';
 import MarkdownMessage from '@/components/MarkdownMessage';
 import AppLogo from '@/components/AppLogo';
+import AiBanner from '@/components/AiBanner';
 import SidebarShell from '@/components/SidebarShell';
 import { CHAT_THEMES, getChatTheme, type ChatTheme } from '@/lib/chatThemes';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -1372,30 +1371,41 @@ const Chat = () => {
                   </div>
                   {!isMultiSelect && (
                     <div className="flex items-center gap-1 flex-shrink-0 ml-2">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleRenameClick(conversation.id, conversation.title);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
-                      title="Rename chat"
-                    >
-                      <Pencil className="w-3 h-3" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteClick(conversation.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity h-6 w-6 p-0 text-muted-foreground hover:text-foreground fast-transition"
-                      title="Delete chat"
-                    >
-                      <X className="w-3 h-3" />
-                    </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => e.stopPropagation()}
+                            className="h-7 w-7 p-0 rounded-md text-muted-foreground hover:text-foreground hover:bg-hover-muted fast-transition"
+                            aria-label={`Options for ${conversation.title}`}
+                            title="Chat options"
+                          >
+                            <MoreHorizontal className="w-4 h-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRenameClick(conversation.id, conversation.title);
+                            }}
+                          >
+                            <Pencil className="w-4 h-4 mr-2" />
+                            Rename
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteClick(conversation.id);
+                            }}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Delete chat
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
                   )}
                 </div>
@@ -1424,31 +1434,31 @@ const Chat = () => {
         </Tooltip>
       }
       themeExtras={
-        <DropdownMenuSub>
-          <DropdownMenuSubTrigger>Chat theme</DropdownMenuSubTrigger>
-          <DropdownMenuSubContent className="w-56">
-            <DropdownMenuRadioGroup
-              value={chatTheme.id}
-              onValueChange={handleChatThemeChange}
-            >
-              {CHAT_THEMES.map((sel) => (
-                <DropdownMenuRadioItem key={sel.id} value={sel.id}>
-                  <span className="flex -space-x-1 mr-2">
-                    <span
-                      className="w-4 h-4 rounded-full border border-border/40"
-                      style={{ background: sel.swatchUser }}
-                    />
-                    <span
-                      className="w-4 h-4 rounded-full border border-border/40"
-                      style={{ background: sel.swatchAi }}
-                    />
-                  </span>
-                  {sel.label}
-                </DropdownMenuRadioItem>
-              ))}
-            </DropdownMenuRadioGroup>
-          </DropdownMenuSubContent>
-        </DropdownMenuSub>
+        <>
+          <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+            Chat theme
+          </DropdownMenuLabel>
+          <DropdownMenuRadioGroup
+            value={chatTheme.id}
+            onValueChange={handleChatThemeChange}
+          >
+            {CHAT_THEMES.map((sel) => (
+              <DropdownMenuRadioItem key={sel.id} value={sel.id}>
+                <span className="flex -space-x-1 mr-2">
+                  <span
+                    className="w-4 h-4 rounded-full border border-border/40"
+                    style={{ background: sel.swatchUser }}
+                  />
+                  <span
+                    className="w-4 h-4 rounded-full border border-border/40"
+                    style={{ background: sel.swatchAi }}
+                  />
+                </span>
+                {sel.label}
+              </DropdownMenuRadioItem>
+            ))}
+          </DropdownMenuRadioGroup>
+        </>
       }
     >
       {/* Messages Area */}
@@ -1529,10 +1539,7 @@ const Chat = () => {
                       </div>
                     ) : (
                       <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-card-foreground text-left shadow-md min-w-0">
-                        <div className="flex items-center gap-1.5 mb-1.5">
-                          <AppLogo size={14} className="flex-shrink-0" />
-                          <span className="text-xs font-semibold text-primary">Super AI</span>
-                        </div>
+                        <AiBanner />
                         <MarkdownMessage content={message.text} />
                         <Button
                           variant="ghost"
@@ -1558,10 +1565,7 @@ const Chat = () => {
             {isTyping && (
               <div className="max-w-[80%] md:max-w-[70%] w-fit min-w-0 mr-auto animate-slide-in mt-6">
                 <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 shadow-md">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <AppLogo size={14} className="flex-shrink-0" />
-                    <span className="text-xs font-semibold text-primary">Super AI</span>
-                  </div>
+                  <AiBanner />
                   <div className="flex items-center gap-1.5 px-1 pt-1">
                     <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" />
                     <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" style={{ animationDelay: '150ms' }} />

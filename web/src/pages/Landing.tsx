@@ -16,6 +16,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import Navbar from '@/components/Navbar';
 import AppLogo from '@/components/AppLogo';
+import AiBanner from '@/components/AiBanner';
 import { useAuth } from '@/hooks/useAuth';
 
 const Landing = () => {
@@ -188,10 +189,7 @@ const Landing = () => {
                 </div>
 
                 <div className="max-w-[80%] bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-card-foreground text-left shadow-md">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <AppLogo size={14} className="flex-shrink-0" />
-                    <span className="text-xs font-semibold text-primary">Super AI</span>
-                  </div>
+                  <AiBanner />
                   Here's a focused weekly plan: block **deep work** for mornings, reserve one day for **code reviews**, and batch meetings on Friday. Want a day-by-day breakdown?
                 </div>
 

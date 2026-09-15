@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { ChevronDown, CircleHelp, Info, LogOut, MessageSquare, Moon, Monitor, Palette, PanelLeftClose, PanelLeftOpen, Settings, Sun, User } from 'lucide-react';
+import { ChevronDown, CircleHelp, Info, LogOut, MessageSquare, Moon, Monitor, Palette, PanelLeft, PanelLeftClose, PanelLeftOpen, Settings, Sun, User } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useTheme } from '@/hooks/useTheme';
 import { useAuth } from '@/hooks/useAuth';
@@ -12,12 +12,10 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
@@ -132,6 +130,7 @@ const SidebarShell = ({
       {/* Sidebar */}
       <div className={cn(
         "fixed inset-y-0 left-0 z-50 bg-card/95 backdrop-blur-md border-r border-border transition-all duration-300 ease-in-out shadow-elegant",
+        isMobile && (isSidebarOpen ? "translate-x-0" : "-translate-x-full"),
         isSidebarOpen ? "w-80" : "w-16"
       )}>
         {/* Expanded sidebar */}
@@ -140,7 +139,7 @@ const SidebarShell = ({
           !isSidebarOpen && "hidden"
         )}>
           {/* Sidebar Header */}
-          <div className="p-4 border-b border-border bg-gradient-hover">
+          <div className="p-4 border-b border-border bg-gradient-hover shrink-0">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <AppLogo size={26} />
@@ -171,7 +170,9 @@ const SidebarShell = ({
             <ScrollArea className="flex-1">
               <div className="p-4">{sidebarContent}</div>
             </ScrollArea>
-          ) : null}
+          ) : (
+            <div className="flex-1" />
+          )}
 
           {/* Sidebar Footer */}
           <div className="border-t border-border p-3 space-y-1 shrink-0">
@@ -190,30 +191,29 @@ const SidebarShell = ({
                   <ChevronDown className="w-4 h-4 text-muted-foreground/70" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-60">
+              <DropdownMenuContent align="start" className="w-60 max-h-[70vh] overflow-y-auto">
                 {themeExtras}
-                <DropdownMenuSub>
-                  <DropdownMenuSubTrigger>Mode</DropdownMenuSubTrigger>
-                  <DropdownMenuSubContent className="w-44">
-                    <DropdownMenuRadioGroup
-                      value={theme}
-                      onValueChange={(value) => setTheme(value as 'dark' | 'light' | 'system')}
-                    >
-                      <DropdownMenuRadioItem value="light">
-                        <Sun className="w-4 h-4 mr-2" />
-                        Light
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="dark">
-                        <Moon className="w-4 h-4 mr-2" />
-                        Dark
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="system">
-                        <Monitor className="w-4 h-4 mr-2" />
-                        System
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuSubContent>
-                </DropdownMenuSub>
+                {themeExtras && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                  Mode
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={theme}
+                  onValueChange={(value) => setTheme(value as 'dark' | 'light' | 'system')}
+                >
+                  <DropdownMenuRadioItem value="light">
+                    <Sun className="w-4 h-4 mr-2" />
+                    Light
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="dark">
+                    <Moon className="w-4 h-4 mr-2" />
+                    Dark
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="system">
+                    <Monitor className="w-4 h-4 mr-2" />
+                    System
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
               </DropdownMenuContent>
             </DropdownMenu>
             <Separator />
@@ -320,21 +320,72 @@ const SidebarShell = ({
       {/* Main content */}
       <div className={cn(
         "flex flex-col h-screen flex-1 min-w-0 transition-all duration-300 ease-in-out overflow-hidden",
-        isMobile ? "ml-0" : isSidebarOpen ? "lg:ml-80" : "lg:ml-16"
+        isMobile ? "ml-0" : isSidebarOpen ? "md:ml-80" : "md:ml-16"
       )}>
         {/* Header */}
         <div className="bg-background/95 backdrop-blur-md border-b border-border px-4 py-2.5 flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            {title == null ? (
-              <h1 className="text-lg font-semibold text-foreground truncate max-w-[50vw]">Super AI</h1>
-            ) : typeof title === 'string' ? (
-              <h1 className="text-lg font-semibold text-foreground truncate max-w-[50vw]">{title}</h1>
-            ) : (
-              title
+          <div className="flex items-center gap-2 min-w-0">
+            {isMobile && (
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setIsSidebarOpen(true)}
+                className="h-9 w-9 p-0 flex-shrink-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground md:hidden"
+                aria-label="Open navigation menu"
+                title="Open navigation menu"
+              >
+                <PanelLeft className="w-5 h-5" />
+              </Button>
             )}
-            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+            <div className="min-w-0">
+              {title == null ? (
+                <h1 className="text-lg font-semibold text-foreground truncate max-w-[50vw]">Super AI</h1>
+              ) : typeof title === 'string' ? (
+                <h1 className="text-lg font-semibold text-foreground truncate max-w-[50vw]">{title}</h1>
+              ) : (
+                title
+              )}
+              {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
+            </div>
           </div>
-          <nav className="flex items-center flex-shrink-0 gap-1" aria-label="Account">
+          <nav className="flex items-center flex-shrink-0 gap-1">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                  title="Theme"
+                  aria-label="Theme"
+                >
+                  <Palette className="w-5 h-5" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60 max-h-[70vh] overflow-y-auto">
+                {themeExtras}
+                {themeExtras && <DropdownMenuSeparator />}
+                <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                  Mode
+                </DropdownMenuLabel>
+                <DropdownMenuRadioGroup
+                  value={theme}
+                  onValueChange={(value) => setTheme(value as 'dark' | 'light' | 'system')}
+                >
+                  <DropdownMenuRadioItem value="light">
+                    <Sun className="w-4 h-4 mr-2" />
+                    Light
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="dark">
+                    <Moon className="w-4 h-4 mr-2" />
+                    Dark
+                  </DropdownMenuRadioItem>
+                  <DropdownMenuRadioItem value="system">
+                    <Monitor className="w-4 h-4 mr-2" />
+                    System
+                  </DropdownMenuRadioItem>
+                </DropdownMenuRadioGroup>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
