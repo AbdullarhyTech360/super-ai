@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, Mail, Shield, User } from 'lucide-react';
 import AuthShell from '@/components/AuthShell';
 import PasswordInput from '@/components/PasswordInput';
+import TitleUnderline from '@/components/TitleUnderline';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -110,7 +111,10 @@ const Signup = () => {
       subheadline="Join thousands of users chatting smarter with AI."
     >
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-foreground mb-1">Create Account</h1>
+        <div className="w-fit mx-auto">
+          <h1 className="text-2xl font-bold text-foreground">Create Account</h1>
+          <TitleUnderline />
+        </div>
         <p className="text-muted-foreground text-sm">
           Start your first conversation in under a minute
         </p>

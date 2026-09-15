@@ -2,6 +2,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Loader2, Mail, Shield } from 'lucide-react';
 import AuthShell from '@/components/AuthShell';
 import PasswordInput from '@/components/PasswordInput';
+import TitleUnderline from '@/components/TitleUnderline';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
@@ -77,7 +78,10 @@ const Login = () => {
       subheadline="Sign in to continue your conversations."
     >
       <div className="text-center mb-8">
-        <h1 className="text-2xl font-bold text-foreground mb-1">Sign In</h1>
+        <div className="w-fit mx-auto">
+          <h1 className="text-2xl font-bold text-foreground">Sign In</h1>
+          <TitleUnderline />
+        </div>
         <p className="text-muted-foreground text-sm">
           Access your chats, themes, and saved conversations
         </p>

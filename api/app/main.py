@@ -1,43 +1,40 @@
+import json
+import os
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from datetime import datetime, timedelta, timezone
-
 import jwt
-from fastapi.security import OAuth2PasswordBearer
+from dotenv import load_dotenv
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from sqlmodel import Session
-from app.db.session import get_session
-from app.db.database import create_db_and_tables
-from app.models.user import User
-from app.models.forms import SignUp, Login
-from app.schemas.conversation_role import Rename_request, ConversationBulkDeleteRequest
-from app.schemas.user import ChangePasswordRequest, ProfileUpdate
-from app.services.conversation_ai import send_message_stream, send_message_stream_with_title
-from app.services.uploads import (
-    IMAGE_TYPES,
-    UPLOADS_DIR,
-    attachment_url,
-    build_ai_parts,
-    save_image_upload,
-    save_upload,
-)
 
-import os
-import json
-from dotenv import load_dotenv
+from app.db.database import create_db_and_tables
+from app.db.session import get_session
+from app.models.forms import Login, SignUp
+from app.models.user import User
+from app.schemas.conversation_role import (ConversationBulkDeleteRequest,
+                                           Rename_request)
+from app.schemas.user import (ChangePasswordRequest, ForgotPasswordRequest,
+                              ProfileUpdate, ResetPasswordRequest)
+from app.services.conversation_ai import (send_message_stream,
+                                          send_message_stream_with_title)
+from app.services.uploads import (IMAGE_TYPES, UPLOADS_DIR, attachment_url,
+                                  build_ai_parts, save_image_upload,
+                                  save_upload)
 
 load_dotenv()
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "your_secret_key_here")
 ALGORITHM = os.environ.get("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(
-    os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
-)
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+RESET_TOKEN_EXPIRE_MINUTES = int(os.environ.get("RESET_TOKEN_EXPIRE_MINUTES", "30"))
+FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/user")
 
@@ -60,10 +57,12 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 sessionDep = Annotated[Session, Depends(get_session)]
 
+
 # Create some helpers
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     # Implement your password verification logic here
     return password_hash.verify(plain_password, hashed_password)
+
 
 def authenticate_user(email: str, password: str, session: Session) -> User:
     user = session.query(User).filter(User.email == email).first()
@@ -72,7 +71,11 @@ def authenticate_user(email: str, password: str, session: Session) -> User:
         return None
     return user
 
-def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], session: Session = Depends(get_session)) -> User:
+
+def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)],
+    session: Session = Depends(get_session),
+) -> User:
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         email: str = payload.get("sub")
@@ -86,9 +89,11 @@ def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], session: Ses
         raise HTTPException(status_code=404, detail="User not found")
     return user
 
+
 @app.get("/")
 def read_root():
     return {"message": "Hello, World!"}
+
 
 @app.on_event("startup")
 def startup_event():
@@ -96,18 +101,21 @@ def startup_event():
     print("Starting up the application...")
     create_db_and_tables()
 
+
 # Create a route to create a new user
 @app.post("/api/auth/signup")
 def create_user(user_data: SignUp, session: sessionDep):
     # First check if the user already exists in the database using the provided email
     existing_user = session.query(User).filter(User.email == user_data.email).first()
     if existing_user:
-        raise HTTPException(status_code=400, detail="User with this email already exists.")
+        raise HTTPException(
+            status_code=400, detail="User with this email already exists."
+        )
 
     new_user = User(
         full_name=user_data.full_name,
         email=user_data.email,
-        hashed_password=password_hash.hash(user_data.password)
+        hashed_password=password_hash.hash(user_data.password),
     )
     # If the user does not exist, add the new user to the database
 
@@ -116,6 +124,7 @@ def create_user(user_data: SignUp, session: sessionDep):
     session.refresh(new_user)  # Refresh the user instance to get the generated ID
     return {"message": "User created successfully", "user_id": new_user.id}
 
+
 @app.get("/api/get/user")
 def get_user(email: str, session: sessionDep):
     # Query the database for the user with the provided email
@@ -123,6 +132,7 @@ def get_user(email: str, session: sessionDep):
     if not user:
         raise HTTPException(status_code=404, detail="User not found.")
     return {"user_id": user.id, "email": user.email}
+
 
 @app.post("/api/auth/login")
 def authenticate_user_route(form_data: Login, session: sessionDep):
@@ -143,6 +153,63 @@ def authenticate_user_route(form_data: Login, session: sessionDep):
 
     return {"access_token": token, "token_type": "bearer"}
 
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(forgot_request: ForgotPasswordRequest, session: sessionDep):
+    user = session.query(User).filter(User.email == forgot_request.email).first()
+    if user:
+        expires = datetime.now(timezone.utc) + timedelta(
+            minutes=RESET_TOKEN_EXPIRE_MINUTES
+        )
+        reset_token = jwt.encode(
+            {
+                "sub": user.email,
+                "type": "password_reset",
+                "exp": expires,
+            },
+            SECRET_KEY,
+            algorithm=ALGORITHM,
+        )
+        reset_url = f"{FRONTEND_BASE_URL}/reset-password?token={reset_token}"
+        # TODO: Replace with real email delivery when the email service is
+        # configured during deployment. Until then, the link is logged to the
+        # server console for local development.
+        print(f"[password_reset] Reset link for {user.email}: {reset_url}")
+
+    # Always return the same message to avoid leaking which emails are registered.
+    return {
+        "message": "If an account exists for that email, a reset link has been sent."
+    }
+
+
+@app.post("/api/auth/reset-password")
+def reset_password(reset_request: ResetPasswordRequest, session: sessionDep):
+    try:
+        payload = jwt.decode(reset_request.token, SECRET_KEY, algorithms=[ALGORITHM])
+    except InvalidTokenError:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    if payload.get("type") != "password_reset" or payload.get("sub") is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    email = payload.get("sub")
+    user = session.query(User).filter(User.email == email).first()
+    if user is None:
+        raise HTTPException(status_code=400, detail="Invalid or expired reset link.")
+
+    new_password = reset_request.new_password
+    if len(new_password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be at least 6 characters long.",
+        )
+
+    user.hashed_password = password_hash.hash(new_password)
+    session.add(user)
+    session.commit()
+    return {"message": "Password has been reset successfully."}
+
+
 @app.get("/api/me")
 def get_current_user_info(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -157,6 +224,7 @@ def get_current_user_info(
             else None
         ),
     }
+
 
 @app.put("/api/me")
 def update_current_user_info(
@@ -183,6 +251,7 @@ def update_current_user_info(
         ),
     }
 
+
 @app.post("/api/me/avatar")
 def upload_current_user_avatar(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -207,13 +276,16 @@ def upload_current_user_avatar(
 
     return {"avatar_url": attachment_url(current_user.id, avatar_path)}
 
+
 @app.post("/api/change-password")
 def change_current_user_password(
     change_request: ChangePasswordRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     session: sessionDep,
 ):
-    if not verify_password(change_request.current_password, current_user.hashed_password):
+    if not verify_password(
+        change_request.current_password, current_user.hashed_password
+    ):
         raise HTTPException(status_code=400, detail="Current password is incorrect.")
 
     new_password = change_request.new_password
@@ -227,6 +299,7 @@ def change_current_user_password(
     session.add(current_user)
     session.commit()
     return {"message": "Password updated successfully."}
+
 
 @app.get("/api/export")
 def export_current_user_data(
@@ -250,29 +323,37 @@ def export_current_user_data(
         )
         message_data = []
         for message in messages:
-            message_data.append({
-                "id": message.id,
-                "text": message.text,
-                "sender": message.sender,
-                "created_at": message.created_at,
-                "attachments": [
-                    {
-                        "id": attachment.id,
-                        "filename": attachment.filename,
-                        "mime_type": attachment.mime_type,
-                        "size": attachment.size,
-                        "url": attachment_url(current_user.id, attachment.stored_path),
-                    }
-                    for attachment in message.attachments
-                ],
-            })
-        conversation_data.append({
-            "id": conversation.id,
-            "title": conversation.title,
-            "created_at": messages[0].created_at if messages else conversation.updated_at,
-            "updated_at": conversation.updated_at,
-            "messages": message_data,
-        })
+            message_data.append(
+                {
+                    "id": message.id,
+                    "text": message.text,
+                    "sender": message.sender,
+                    "created_at": message.created_at,
+                    "attachments": [
+                        {
+                            "id": attachment.id,
+                            "filename": attachment.filename,
+                            "mime_type": attachment.mime_type,
+                            "size": attachment.size,
+                            "url": attachment_url(
+                                current_user.id, attachment.stored_path
+                            ),
+                        }
+                        for attachment in message.attachments
+                    ],
+                }
+            )
+        conversation_data.append(
+            {
+                "id": conversation.id,
+                "title": conversation.title,
+                "created_at": (
+                    messages[0].created_at if messages else conversation.updated_at
+                ),
+                "updated_at": conversation.updated_at,
+                "messages": message_data,
+            }
+        )
 
     return {
         "user": {
@@ -289,6 +370,7 @@ def export_current_user_data(
         "conversations": conversation_data,
     }
 
+
 @app.post("/api/chat")
 def chat_with_ai(
     current_user: Annotated[User, Depends(get_current_user)],
@@ -303,14 +385,13 @@ def chat_with_ai(
     from app.models.chat import Attachment, Conversation, Message
 
     input_text = " ".join(input.split())[:8000].strip()
-    saved_attachments = [
-        save_upload(current_user.id, upload) for upload in files
-    ]
+    saved_attachments = [save_upload(current_user.id, upload) for upload in files]
 
     if not input_text and saved_attachments:
         input_text = (
             f"Describe or summarize the attached file(s): "
-            + ", ".join(attachment[2] for attachment in saved_attachments) + "."
+            + ", ".join(attachment[2] for attachment in saved_attachments)
+            + "."
         )
     if not input_text:
         for upload in files:
@@ -366,7 +447,9 @@ def chat_with_ai(
     elif conversation_id is not None:
         response_conversation_id = conversation_id
     else:
-        response_conversation_id = f"tmp-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        response_conversation_id = (
+            f"tmp-{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+        )
 
     attachment_meta = [
         {
@@ -392,19 +475,24 @@ def chat_with_ai(
 
     def stream_response():
         import json
+
         fallback_title = input_text[:50]
 
-        yield json.dumps({
-            "type": "start",
-            "conversation_id": response_conversation_id,
-            "title": fallback_title if is_new or conversation_id is None else None,
-            "attachments": start_attachments,
-        }) + "\n"
+        yield json.dumps(
+            {
+                "type": "start",
+                "conversation_id": response_conversation_id,
+                "title": fallback_title if is_new or conversation_id is None else None,
+                "attachments": start_attachments,
+            }
+        ) + "\n"
 
         response_parts = []
         if is_new or conversation_id is None:
             if persist and conversation is not None:
-                stream = send_message_stream_with_title(input_text, history_list, ai_parts)
+                stream = send_message_stream_with_title(
+                    input_text, history_list, ai_parts
+                )
                 title = ""
                 for event_type, value in stream:
                     if event_type == "title":
@@ -440,17 +528,23 @@ def chat_with_ai(
             session.refresh(user_message)
 
             for meta in attachment_meta:
-                session.add(Attachment(
-                    message_id=user_message.id,
-                    filename=meta["filename"],
-                    mime_type=meta["mime_type"],
-                    size=meta["size"],
-                    stored_path=meta["generated_name"],
-                ))
+                session.add(
+                    Attachment(
+                        message_id=user_message.id,
+                        filename=meta["filename"],
+                        mime_type=meta["mime_type"],
+                        size=meta["size"],
+                        stored_path=meta["generated_name"],
+                    )
+                )
 
-            session.add_all([
-                Message(conversation_id=conversation.id, text=response, sender="ai"),
-            ])
+            session.add_all(
+                [
+                    Message(
+                        conversation_id=conversation.id, text=response, sender="ai"
+                    ),
+                ]
+            )
             conversation.updated_at = datetime.now(timezone.utc)
             session.add(conversation)
             session.commit()
@@ -460,6 +554,7 @@ def chat_with_ai(
         stream_response(),
         media_type="application/x-ndjson",
     )
+
 
 # A route for fetching conversations for the current user
 @app.get("/api/conversations")
@@ -482,35 +577,40 @@ def get_conversations(
             .order_by(Message.created_at)
             .all()
         )
-        conversation_data.append({
-            "id": conversation.id,
-            "title": conversation.title,
-            "created_at": messages[0].created_at if messages else conversation.updated_at,
-            "updated_at": conversation.updated_at,
-            "messages": [
-                {
-                    "id": message.id,
-                    "text": message.text,
-                    "sender": message.sender,
-                    "created_at": message.created_at,
-                    "attachments": [
-                        {
-                            "id": attachment.id,
-                            "filename": attachment.filename,
-                            "mime_type": attachment.mime_type,
-                            "size": attachment.size,
-                            "url": attachment_url(
-                                current_user.id, attachment.stored_path
-                            ),
-                        }
-                        for attachment in message.attachments
-                    ],
-                }
-                for message in messages
-            ],
-        })
+        conversation_data.append(
+            {
+                "id": conversation.id,
+                "title": conversation.title,
+                "created_at": (
+                    messages[0].created_at if messages else conversation.updated_at
+                ),
+                "updated_at": conversation.updated_at,
+                "messages": [
+                    {
+                        "id": message.id,
+                        "text": message.text,
+                        "sender": message.sender,
+                        "created_at": message.created_at,
+                        "attachments": [
+                            {
+                                "id": attachment.id,
+                                "filename": attachment.filename,
+                                "mime_type": attachment.mime_type,
+                                "size": attachment.size,
+                                "url": attachment_url(
+                                    current_user.id, attachment.stored_path
+                                ),
+                            }
+                            for attachment in message.attachments
+                        ],
+                    }
+                    for message in messages
+                ],
+            }
+        )
 
     return {"conversations": conversation_data}
+
 
 @app.delete("/api/conversations/{conversation_id}")
 def delete_conversation(
@@ -525,9 +625,9 @@ def delete_conversation(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     stored_paths = []
-    for message in session.query(Message).filter(
-        Message.conversation_id == conversation.id
-    ).all():
+    for message in (
+        session.query(Message).filter(Message.conversation_id == conversation.id).all()
+    ):
         for attachment in message.attachments:
             stored_paths.append(attachment.stored_path)
 
@@ -538,6 +638,7 @@ def delete_conversation(
         target = UPLOADS_DIR / current_user.id / stored_path
         target.unlink(missing_ok=True)
     return {"message": "Conversation was deleted successfully."}
+
 
 @app.post("/api/conversations/bulk-delete")
 def bulk_delete_conversations(
@@ -585,6 +686,7 @@ def bulk_delete_conversations(
         "message": f"{len(conversations)} conversation(s) deleted successfully.",
         "deleted": len(conversations),
     }
+
 
 @app.put("/api/conversations/{conversation_id}")
 def rename_conversation(
