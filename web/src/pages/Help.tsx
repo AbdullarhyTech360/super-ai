@@ -13,19 +13,19 @@ const Help = () => {
   const faqs = [
     {
       question: "How do I start a new conversation?",
-      answer: "Click the 'New Chat' button in the sidebar or use the '+' icon in the chat interface. You can then type your message and press Enter to start chatting with our AI assistant."
+      answer: "Click the 'New Chat' button in the sidebar (or the '+' button in the sidebar header) to start a fresh conversation. You can then type your message and press Enter to start chatting with our AI assistant."
     },
     {
       question: "Can I save my conversations?",
-      answer: "Yes! Conversations are saved automatically by default. For chats you don't want to keep, tap the temporary-chat button next to the conversation title — that chat won't be saved and can't be retrieved after you close it."
+      answer: "Yes! Conversations are saved automatically by default. For chats you don't want to keep, click the temporary chat icon in the sidebar header (next to the New Chat button) — that chat won't be saved and can't be retrieved after you close it."
     },
     {
       question: "How do I change my profile settings?",
-      answer: "Go to Settings from the navigation menu, then select 'Profile Settings' to update your name, email, avatar, and other personal information."
+      answer: "Go to Settings from the navigation menu, then select 'Profile Settings' to update your name and avatar."
     },
     {
       question: "Is my data secure?",
-      answer: "Absolutely. We use end-to-end encryption for all conversations and follow industry-standard security practices to protect your data."
+      answer: "Yes. Your password is securely hashed, all API access is protected by authentication tokens, and conversations are stored in a secure database. We follow industry-standard security practices to protect your data."
     },
     {
       question: "Can I use voice messages?",
@@ -41,20 +41,23 @@ const Help = () => {
     }
   ];
 
+  const devEmail = 'abdullahimaikidandan@gmail.com';
+
   const supportOptions = [
-    {
-      title: "Live Chat Support",
-      description: "Get instant help from our support team",
-      icon: MessageCircle,
-      action: "Start Chat",
-      available: true
-    },
     {
       title: "Email Support",
       description: "Send us a detailed message about your issue",
       icon: Mail,
       action: "Send Email",
-      available: true
+      available: true,
+      href: `mailto:${devEmail}`
+    },
+    {
+      title: "Live Chat Support",
+      description: "Get instant help from our support team",
+      icon: MessageCircle,
+      action: "Start Chat",
+      available: false
     },
     {
       title: "Phone Support",
@@ -198,6 +201,7 @@ const Help = () => {
                             className={option.available ? "w-full" : "w-full"}
                             variant={option.available ? "default" : "secondary"}
                             style={option.available ? { background: 'var(--gradient-primary)' } : undefined}
+                            onClick={option.href ? () => window.open(option.href, '_blank') : undefined}
                           >
                             {option.action}
                           </Button>

@@ -160,7 +160,7 @@ Use an ORM (e.g., SQLAlchemy/SQLModel) and configure your database connection us
 
 ## Support
 
-For technical support, feature requests, or questions, please open an issue or contact us at [super-ai-support@example.com](#).
+For technical support, feature requests, or questions, please open an issue or contact us at [abdullahimaikidandan@gmail.com](mailto:abdullahimaikidandan@gmail.com).
 
 ## About Us
 

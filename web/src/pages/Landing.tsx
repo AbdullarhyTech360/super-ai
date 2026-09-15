@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import Navbar from '@/components/Navbar';
 import AppLogo from '@/components/AppLogo';
 import AiBanner from '@/components/AiBanner';
+import MarkdownMessage from '@/components/MarkdownMessage';
 import { useAuth } from '@/hooks/useAuth';
 
 const Landing = () => {
@@ -190,7 +191,7 @@ const Landing = () => {
 
                 <div className="max-w-[80%] bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-card-foreground text-left shadow-md">
                   <AiBanner />
-                  Here's a focused weekly plan: block **deep work** for mornings, reserve one day for **code reviews**, and batch meetings on Friday. Want a day-by-day breakdown?
+                  <MarkdownMessage content="Here's a focused weekly plan: block **deep work** for mornings, reserve one day for **code reviews**, and batch meetings on Friday. Want a day-by-day breakdown?" />
                 </div>
 
                 <div className="flex items-center gap-1.5 px-1 pt-1">

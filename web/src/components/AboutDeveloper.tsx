@@ -53,7 +53,7 @@ const AboutDeveloper = ({ open, onOpenChange }: AboutDeveloperProps) => {
             <Button
               variant="outline"
               className="w-full justify-start"
-              onClick={() => window.open('https://github.com', '_blank')}
+              onClick={() => window.open('https://github.com/AbdullarhyTech360', '_blank')}
             >
               <Github className="w-4 h-4 mr-2" />
               GitHub
@@ -61,7 +61,7 @@ const AboutDeveloper = ({ open, onOpenChange }: AboutDeveloperProps) => {
             <Button
               variant="outline"
               className="w-full justify-start"
-              onClick={() => window.open('mailto:hello@superai.dev', '_blank')}
+              onClick={() => window.open('mailto:abdullahimaikidandan@gmail.com', '_blank')}
             >
               <Mail className="w-4 h-4 mr-2" />
               Email the Developer
