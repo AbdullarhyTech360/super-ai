@@ -9,6 +9,7 @@ services:
       - ./api:/app
     environment:
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=${DATABASE_URL}
   frontend:
     build: ./web
     command: npm run dev
