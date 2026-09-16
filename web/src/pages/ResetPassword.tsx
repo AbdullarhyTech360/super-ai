@@ -9,6 +9,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/hooks/use-toast';
+import { API_BASE_URL } from '@/lib/api';
 
 const resetPasswordSchema = z
   .object({
@@ -38,7 +39,7 @@ const ResetPassword = () => {
 
   const onSubmit = async (data: ResetPasswordFormData) => {
     try {
-      const response = await fetch('http://localhost:8000/api/auth/reset-password', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/reset-password`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

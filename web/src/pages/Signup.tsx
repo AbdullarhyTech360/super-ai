@@ -13,6 +13,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
+import { API_BASE_URL } from '@/lib/api';
 
 const signupSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters long'),
@@ -74,7 +75,7 @@ const Signup = () => {
     };
 
     try {
-      const response = await fetch('http://localhost:8000/api/auth/signup', {
+      const response = await fetch(`${API_BASE_URL}/api/auth/signup`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

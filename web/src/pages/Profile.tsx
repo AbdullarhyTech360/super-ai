@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import SidebarShell from '@/components/SidebarShell';
 import { useAuth } from '@/hooks/useAuth';
-import { resolveAssetUrl } from '@/lib/api';
+import { resolveAssetUrl, API_BASE_URL } from '@/lib/api';
 
 interface ProfileUser {
   id: string;
@@ -44,8 +44,8 @@ const Profile = () => {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
         };
         const [userResponse, conversationsResponse] = await Promise.all([
-          authenticatedFetch('http://localhost:8000/api/me', { headers }),
-          authenticatedFetch('http://localhost:8000/api/conversations', { headers }),
+          authenticatedFetch(`${API_BASE_URL}/api/me`, { headers }),
+          authenticatedFetch(`${API_BASE_URL}/api/conversations`, { headers }),
         ]);
 
         if (!userResponse.ok || !conversationsResponse.ok) {

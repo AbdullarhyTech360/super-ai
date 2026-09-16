@@ -29,6 +29,7 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
+import { API_BASE_URL } from '@/lib/api';
 import { useTheme } from '@/hooks/useTheme';
 import MarkdownMessage from '@/components/MarkdownMessage';
 import AppLogo from '@/components/AppLogo';
@@ -657,7 +658,7 @@ const Chat = () => {
   useEffect(() => {
     const fetchConversations = async () => {
       try {
-        const response = await authenticatedFetch('http://localhost:8000/api/conversations',{
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/conversations`,{
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -698,7 +699,7 @@ const Chat = () => {
   useEffect(() => {
     const fetchUserInfo = async () => {
       try {
-        const response = await authenticatedFetch('http://localhost:8000/api/me', {
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/me`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -775,7 +776,7 @@ const Chat = () => {
     if (isMultiSelect && selectedConversationIds.size > 0) {
       const ids = Array.from(selectedConversationIds);
       const count = ids.length;
-      authenticatedFetch('http://localhost:8000/api/conversations/bulk-delete', {
+      authenticatedFetch(`${API_BASE_URL}/api/conversations/bulk-delete`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -810,7 +811,7 @@ const Chat = () => {
       });
     } else if (conversationToDelete) {
       const conversationTitle = conversations.find(conv => conv.id === conversationToDelete)?.title || 'Conversation';
-      authenticatedFetch(`http://localhost:8000/api/conversations/${conversationToDelete}`, {
+      authenticatedFetch(`${API_BASE_URL}/api/conversations/${conversationToDelete}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
@@ -848,7 +849,7 @@ const Chat = () => {
     const trimmedTitle = newTitle.trim();
     if (!trimmedTitle) return;
 
-    authenticatedFetch(`http://localhost:8000/api/conversations/${id}`, {
+    authenticatedFetch(`${API_BASE_URL}/api/conversations/${id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -1030,7 +1031,7 @@ const Chat = () => {
         }
         sentAttachments.forEach(attachment => formData.append('files', attachment.file));
 
-        const response = await authenticatedFetch('http://localhost:8000/api/chat', {
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/chat`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${accessToken}`,

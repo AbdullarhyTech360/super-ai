@@ -20,6 +20,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { resolveAssetUrl } from '@/lib/api';
+import { API_BASE_URL } from '@/lib/api';
 import AppLogo from './AppLogo';
 import AboutDeveloper from './AboutDeveloper';
 
@@ -93,7 +94,7 @@ const SidebarShell = ({
   useEffect(() => {
     const fetchUserInfo = async () => {
       try {
-        const response = await authenticatedFetch('http://localhost:8000/api/me', {
+        const response = await authenticatedFetch(`${API_BASE_URL}/api/me`, {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',

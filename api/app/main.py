@@ -43,9 +43,12 @@ password_hash = PasswordHash.recommended()
 app = FastAPI()
 
 origins = [
-    "http://localhost",
-    "http://localhost:3000",
-    "http://localhost:8080",
+    origin.strip()
+    for origin in os.environ.get(
+        "CORS_ORIGINS",
+        "http://localhost:3000,http://localhost:8080,http://localhost",
+    ).split(",")
+    if origin.strip()
 ]
 app.add_middleware(
     CORSMiddleware,
