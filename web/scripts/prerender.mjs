@@ -68,7 +68,7 @@ async function main() {
 
     for (const route of routes) {
       await page.goto(`${APP_URL}${route.path}`, {
-        waitUntil: "networkidle0",
+        waitUntil: "domcontentloaded",
         timeout: 60000,
       });
       await page.waitForFunction(
