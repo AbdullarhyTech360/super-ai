@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { Loader2, Mail, Shield, User } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { Loader2, Mail, MailCheck, RefreshCw, Shield, User } from 'lucide-react';
 import AuthShell from '@/components/AuthShell';
 import PasswordInput from '@/components/PasswordInput';
 import TitleUnderline from '@/components/TitleUnderline';
@@ -44,7 +44,9 @@ const STRENGTH_TEXT_COLORS = ['text-destructive', 'text-orange-500', 'text-prima
 
 const Signup = () => {
   const { toast } = useToast();
-  const navigate = useNavigate();
+  const [emailSent, setEmailSent] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
+  const [resending, setResending] = useState(false);
 
   const form = useForm<SignupFormData>({
     resolver: zodResolver(signupSchema),
@@ -65,6 +67,42 @@ const Signup = () => {
       title: `${provider} sign up is coming soon`,
       description: 'Use your email and password to create an account for now.',
     });
+  };
+
+  const handleResend = async () => {
+    if (!registeredEmail) return;
+    setResending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/resend-verification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: registeredEmail }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        toast({
+          title: 'Resend Failed',
+          description: errorData.detail || 'Unable to resend the confirmation link. Please try again.',
+        });
+        return;
+      }
+
+      toast({
+        title: 'Confirmation Sent',
+        description: `A new confirmation link has been sent to ${registeredEmail}.`,
+      });
+    } catch (error) {
+      console.error('Error resending verification:', error);
+      toast({
+        title: 'Resend Failed',
+        description: 'An error occurred while resending the link. Please try again.',
+      });
+    } finally {
+      setResending(false);
+    }
   };
 
   const onSubmit = async (data: SignupFormData) => {
@@ -92,11 +130,8 @@ const Signup = () => {
         return;
       }
 
-      toast({
-        title: 'Account Created',
-        description: `Dear ${data.name}, your account has been created successfully. Please sign in to continue.`,
-      });
-      navigate('/login');
+      setRegisteredEmail(data.email);
+      setEmailSent(true);
     } catch (error) {
       console.error('Error during signup:', error);
       toast({
@@ -121,6 +156,48 @@ const Signup = () => {
         </p>
       </div>
 
+      {emailSent ? (
+        <div className="space-y-5 text-center">
+          <div className="mx-auto w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center">
+            <MailCheck className="w-8 h-8 text-primary" />
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-lg font-semibold text-foreground">Check your email</h2>
+            <p className="text-sm text-muted-foreground">
+              We sent a confirmation link to{' '}
+              <span className="font-medium text-foreground">{registeredEmail}</span>.
+              Click the link in the email to activate your account. The link expires in 30 minutes.
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full h-12 font-medium rounded-xl"
+            onClick={handleResend}
+            disabled={resending}
+          >
+            {resending ? (
+              <>
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                Resending...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Resend confirmation link
+              </>
+            )}
+          </Button>
+          <Link
+            to="/login"
+            className="inline-block w-full h-12 leading-[3rem] text-primary-foreground font-semibold rounded-xl shadow-glow hover:shadow-xl hover:-translate-y-0.5 transition-all duration-300"
+            style={{ background: 'var(--gradient-primary)' }}
+          >
+            Back to Sign In
+          </Link>
+        </div>
+      ) : (
+        <>
       <div className="space-y-4 mb-6">
         <div className="grid grid-cols-2 gap-4">
           <Button
@@ -308,6 +385,8 @@ const Signup = () => {
           </Button>
         </form>
       </Form>
+      </>
+      )}
 
       <p className="mt-5 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
         <Shield className="w-3.5 h-3.5" />

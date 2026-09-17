@@ -18,15 +18,28 @@ from app.db.database import create_db_and_tables
 from app.db.session import get_session
 from app.models.forms import Login, SignUp
 from app.models.user import User
-from app.schemas.conversation_role import (ConversationBulkDeleteRequest,
-                                           Rename_request)
-from app.schemas.user import (ChangePasswordRequest, ForgotPasswordRequest,
-                              ProfileUpdate, ResetPasswordRequest)
-from app.services.conversation_ai import (send_message_stream,
-                                          send_message_stream_with_title)
-from app.services.uploads import (IMAGE_TYPES, UPLOADS_DIR, attachment_url,
-                                  build_ai_parts, save_image_upload,
-                                  save_upload)
+from app.schemas.conversation_role import ConversationBulkDeleteRequest, Rename_request
+from app.schemas.user import (
+    ChangePasswordRequest,
+    ForgotPasswordRequest,
+    ProfileUpdate,
+    ResendVerificationRequest,
+    ResetPasswordRequest,
+    VerifyEmailRequest,
+)
+from app.services.conversation_ai import (
+    send_message_stream,
+    send_message_stream_with_title,
+)
+from app.services.email import send_verification_email
+from app.services.uploads import (
+    IMAGE_TYPES,
+    UPLOADS_DIR,
+    attachment_url,
+    build_ai_parts,
+    save_image_upload,
+    save_upload,
+)
 
 load_dotenv()
 
@@ -34,6 +47,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "your_secret_key_here")
 ALGORITHM = os.environ.get("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 RESET_TOKEN_EXPIRE_MINUTES = int(os.environ.get("RESET_TOKEN_EXPIRE_MINUTES", "30"))
+VERIFY_TOKEN_EXPIRE_MINUTES = int(os.environ.get("VERIFY_TOKEN_EXPIRE_MINUTES", "30"))
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/user")
@@ -103,6 +117,51 @@ def startup_event():
     # Perform any startup tasks here, such as initializing resources or connections
     print("Starting up the application...")
     create_db_and_tables()
+    migrate_schema()
+
+
+def migrate_schema():
+    """Idempotently apply schema changes that create_all cannot handle."""
+    from sqlalchemy import text
+
+    from app.db.database import engine
+
+    with engine.begin() as conn:
+        # Column is added WITHOUT a default so existing rows become NULL and are
+        # backfilled as verified below (no current user gets locked out). New
+        # signups always set is_verified explicitly via the model.
+        conn.execute(
+            text('ALTER TABLE "user" ' "ADD COLUMN IF NOT EXISTS is_verified BOOLEAN")
+        )
+        # Backfill existing accounts as verified so no current user is locked out.
+        # New users (is_verified = FALSE) are never touched.
+        conn.execute(
+            text('UPDATE "user" SET is_verified = TRUE WHERE is_verified IS NULL')
+        )
+
+
+def _verification_token(email: str) -> str:
+    expires = datetime.now(timezone.utc) + timedelta(
+        minutes=VERIFY_TOKEN_EXPIRE_MINUTES
+    )
+    return jwt.encode(
+        {
+            "sub": email,
+            "type": "email_verification",
+            "exp": expires,
+        },
+        SECRET_KEY,
+        algorithm=ALGORITHM,
+    )
+
+
+def _send_verification_link(email: str) -> None:
+    token = _verification_token(email)
+    verify_url = f"{FRONTEND_BASE_URL}/verify-email?token={token}"
+    try:
+        send_verification_email(email, verify_url)
+    except Exception as exc:  # pragma: no cover - best-effort email delivery
+        print(f"[email] Failed to send verification email to {email}: {exc}")
 
 
 # Create a route to create a new user
@@ -119,13 +178,61 @@ def create_user(user_data: SignUp, session: sessionDep):
         full_name=user_data.full_name,
         email=user_data.email,
         hashed_password=password_hash.hash(user_data.password),
+        is_verified=False,
     )
     # If the user does not exist, add the new user to the database
 
     session.add(new_user)
     session.commit()
     session.refresh(new_user)  # Refresh the user instance to get the generated ID
-    return {"message": "User created successfully", "user_id": new_user.id}
+
+    # Send the email confirmation link after the account is created.
+    _send_verification_link(new_user.email)
+
+    return {
+        "message": "Account created successfully. A confirmation link has been sent to your email.",
+        "user_id": new_user.id,
+    }
+
+
+@app.post("/api/auth/verify-email")
+def verify_email(verify_request: VerifyEmailRequest, session: sessionDep):
+    try:
+        payload = jwt.decode(verify_request.token, SECRET_KEY, algorithms=[ALGORITHM])
+    except InvalidTokenError:
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired verification link."
+        )
+
+    if payload.get("type") != "email_verification" or payload.get("sub") is None:
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired verification link."
+        )
+
+    user = session.query(User).filter(User.email == payload.get("sub")).first()
+    if user is None:
+        raise HTTPException(
+            status_code=400, detail="Invalid or expired verification link."
+        )
+
+    if not user.is_verified:
+        user.is_verified = True
+        session.add(user)
+        session.commit()
+
+    return {"message": "Email verified successfully. You can now sign in."}
+
+
+@app.post("/api/auth/resend-verification")
+def resend_verification(resend_request: ResendVerificationRequest, session: sessionDep):
+    user = session.query(User).filter(User.email == resend_request.email).first()
+    if user and not user.is_verified:
+        _send_verification_link(user.email)
+
+    # Always return the same message to avoid leaking which emails are registered.
+    return {
+        "message": "If an account exists for that email and is not verified, a new confirmation link has been sent."
+    }
 
 
 @app.get("/api/get/user")
@@ -142,6 +249,12 @@ def authenticate_user_route(form_data: Login, session: sessionDep):
     user = authenticate_user(form_data.email, form_data.password, session)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
+
+    if not user.is_verified:
+        raise HTTPException(
+            status_code=403,
+            detail="Please verify your email address first. A confirmation link was sent to your email.",
+        )
 
     expires = datetime.now(timezone.utc) + timedelta(
         minutes=ACCESS_TOKEN_EXPIRE_MINUTES
@@ -253,6 +366,51 @@ def update_current_user_info(
             else None
         ),
     }
+
+
+@app.delete("/api/me")
+def delete_current_user_account(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+):
+    import shutil
+
+    from app.models.chat import Conversation, Message
+
+    conversations = (
+        session.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .all()
+    )
+
+    stored_paths = []
+    for conversation in conversations:
+        messages = (
+            session.query(Message)
+            .filter(Message.conversation_id == conversation.id)
+            .all()
+        )
+        for message in messages:
+            stored_paths.extend(
+                attachment.stored_path for attachment in message.attachments
+            )
+
+    # Deleting conversations cascades to their messages and attachments
+    # (ORM cascade), then the user row is removed.
+    for conversation in conversations:
+        session.delete(conversation)
+    session.flush()
+
+    session.delete(current_user)
+    session.commit()
+
+    # Remove the account's stored files from disk (chat attachments + avatar).
+    for stored_path in stored_paths:
+        target = UPLOADS_DIR / current_user.id / stored_path
+        target.unlink(missing_ok=True)
+    shutil.rmtree(UPLOADS_DIR / current_user.id, ignore_errors=True)
+
+    return {"message": "Your account has been deleted."}
 
 
 @app.post("/api/me/avatar")

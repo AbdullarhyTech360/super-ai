@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Loader2, Mail, Shield } from 'lucide-react';
+import { Loader2, Mail, MailCheck, RefreshCw, Shield } from 'lucide-react';
 import AuthShell from '@/components/AuthShell';
 import PasswordInput from '@/components/PasswordInput';
 import TitleUnderline from '@/components/TitleUnderline';
@@ -24,6 +25,10 @@ const Login = () => {
   const { toast } = useToast();
   const { login } = useAuth();
   const navigate = useNavigate();
+  const [showResend, setShowResend] = useState(false);
+  const [resendEmail, setResendEmail] = useState('');
+  const [resending, setResending] = useState(false);
+  const [resendSent, setResendSent] = useState(false);
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -40,6 +45,43 @@ const Login = () => {
     });
   };
 
+  const handleResend = async () => {
+    if (!resendEmail) return;
+    setResending(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/resend-verification`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email: resendEmail }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        toast({
+          title: 'Resend Failed',
+          description: errorData.detail || 'Unable to resend the confirmation link. Please try again.',
+        });
+        return;
+      }
+
+      setResendSent(true);
+      toast({
+        title: 'Confirmation Sent',
+        description: `A new confirmation link has been sent to ${resendEmail}.`,
+      });
+    } catch (error) {
+      console.error('Error resending verification:', error);
+      toast({
+        title: 'Resend Failed',
+        description: 'An error occurred while resending the link. Please try again.',
+      });
+    } finally {
+      setResending(false);
+    }
+  };
+
   const onSubmit = async (data: LoginFormData) => {
     try {
       const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
@@ -49,6 +91,16 @@ const Login = () => {
         },
         body: JSON.stringify(data),
       });
+
+      if (response.status === 403) {
+        setResendEmail(data.email);
+        setShowResend(true);
+        toast({
+          title: 'Email Not Verified',
+          description: 'Please verify your email address before signing in.',
+        });
+        return;
+      }
 
       if (!response.ok) {
         const errorData = await response.json();
@@ -194,6 +246,41 @@ const Login = () => {
               'Sign In'
             )}
           </Button>
+
+          {showResend && (
+            <div className="rounded-xl border border-border bg-muted/40 p-4 space-y-3 text-center">
+              <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+                <MailCheck className="w-4 h-4 text-primary shrink-0" />
+                <span>Please verify your email before signing in.</span>
+              </div>
+              {resendSent ? (
+                <p className="text-xs text-muted-foreground">
+                  A new confirmation link has been sent to{' '}
+                  <span className="font-medium text-foreground">{resendEmail}</span>.
+                </p>
+              ) : (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full h-11 rounded-xl font-medium"
+                  onClick={handleResend}
+                  disabled={resending || !resendEmail}
+                >
+                  {resending ? (
+                    <>
+                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                      Resending...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Resend confirmation link
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+          )}
         </form>
       </Form>
 

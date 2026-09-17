@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, Bell, Shield, Palette, Globe, LogOut, Save, Camera, Loader2, Download, KeyRound, Eye, EyeOff } from 'lucide-react';
+import { User, Bell, Shield, Palette, Globe, LogOut, Save, Camera, Loader2, Download, KeyRound, Eye, EyeOff, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -65,6 +65,9 @@ const Settings = () => {
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const [isDownloadingData, setIsDownloadingData] = useState(false);
+
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   useEffect(() => {
     const loadSettings = async () => {
@@ -326,6 +329,39 @@ const Settings = () => {
     navigate('/');
   };
 
+  const handleDeleteAccount = async () => {
+    setIsDeletingAccount(true);
+    try {
+      const response = await authenticatedFetch(`${API_BASE_URL}/api/me`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+        },
+      });
+
+      if (!response.ok) {
+        let detail = 'Failed to delete your account.';
+        try {
+          const error = await response.json();
+          if (error?.detail) detail = typeof error.detail === 'string' ? error.detail : detail;
+        } catch { /* keep default message */ }
+        throw new Error(detail);
+      }
+
+      logout();
+      navigate('/');
+    } catch (error) {
+      console.error('Error deleting account:', error);
+      toast({
+        title: 'Delete failed',
+        description: error instanceof Error ? error.message : 'Failed to delete your account. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
   const avatarSrc = resolveAssetUrl(settings.avatarUrl);
   const initials = settings.name
     .split(' ')
@@ -554,10 +590,20 @@ const Settings = () => {
             {/* Account Actions */}
             <Card>
               <CardContent className="pt-6">
-                <Button variant="destructive" onClick={handleSignOut} className="w-full justify-center">
-                  <LogOut className="w-4 h-4 mr-2" />
-                  Sign Out
-                </Button>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <Button variant="destructive" onClick={handleSignOut} className="w-full justify-center">
+                    <LogOut className="w-4 h-4 mr-2" />
+                    Sign Out
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setDeleteDialogOpen(true)}
+                    className="w-full justify-center text-destructive border-destructive/50 hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete Account
+                  </Button>
+                </div>
               </CardContent>
             </Card>
 
@@ -649,6 +695,32 @@ const Settings = () => {
             >
               {isSubmittingPassword && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Update Password
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Account Dialog */}
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete your account?</DialogTitle>
+            <DialogDescription>
+              This will permanently delete your account, all conversations, attachments,
+              uploads, and preferences. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setDeleteDialogOpen(false)}
+              disabled={isDeletingAccount}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleDeleteAccount} disabled={isDeletingAccount}>
+              {isDeletingAccount && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+              Delete My Account
             </Button>
           </DialogFooter>
         </DialogContent>

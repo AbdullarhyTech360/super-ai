@@ -1,5 +1,7 @@
 from sqlmodel import Field, SQLModel
+
 from app.services.generate_uuid import generate_uuid
+
 
 class User(SQLModel, table=True):
     id: str = Field(default_factory=lambda: str(generate_uuid()), primary_key=True)
@@ -7,3 +9,4 @@ class User(SQLModel, table=True):
     email: str = Field(index=True, unique=True)
     hashed_password: str
     avatar_path: str | None = None
+    is_verified: bool = False

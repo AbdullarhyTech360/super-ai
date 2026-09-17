@@ -17,3 +17,11 @@ class ForgotPasswordRequest(SQLModel):
 class ResetPasswordRequest(SQLModel):
     token: str = Field(default="")
     new_password: str = Field(default="")
+
+
+class VerifyEmailRequest(SQLModel):
+    token: str = Field(default="")
+
+
+class ResendVerificationRequest(SQLModel):
+    email: str = Field(default="")

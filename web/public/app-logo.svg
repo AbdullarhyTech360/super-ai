@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" fill="none">
+  <defs>
+    <linearGradient id="super-ai-gradient" x1="0" y1="96" x2="96" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7a5cff" />
+      <stop offset="1" stop-color="#2e7bff" />
+    </linearGradient>
+  </defs>
+  <g transform="rotate(0 48 22)">
+    <rect x="41" y="13" width="14" height="18" rx="7" fill="#2e7bff" opacity="0.85" />
+  </g>
+  <g transform="rotate(60 70.5 35)">
+    <rect x="63.5" y="26" width="14" height="18" rx="7" fill="#7a5cff" opacity="0.6" />
+  </g>
+  <g transform="rotate(120 70.5 61)">
+    <rect x="63.5" y="52" width="14" height="18" rx="7" fill="#2e7bff" opacity="0.85" />
+  </g>
+  <g transform="rotate(180 48 74)">
+    <rect x="41" y="65" width="14" height="18" rx="7" fill="#7a5cff" opacity="0.6" />
+  </g>
+  <g transform="rotate(240 25.5 61)">
+    <rect x="18.5" y="52" width="14" height="18" rx="7" fill="#2e7bff" opacity="0.85" />
+  </g>
+  <g transform="rotate(300 25.5 35)">
+    <rect x="18.5" y="26" width="14" height="18" rx="7" fill="#7a5cff" opacity="0.6" />
+  </g>
+  <circle cx="48" cy="48" r="10" fill="url(#super-ai-gradient)" />
+  <circle cx="45" cy="45" r="4" fill="#ffffff" opacity="0.4" />
+  <path d="M48 44 L50.83 45.17 L52 48 L50.83 50.83 L48 52 L45.17 50.83 L44 48 L45.17 45.17 Z" fill="#ffffff" />
+</svg>

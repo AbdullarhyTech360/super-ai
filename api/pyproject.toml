@@ -14,6 +14,12 @@ license = {text = "MIT"}
 [tool.pdm]
 distribution = false
 
+[tool.isort]
+profile = "black"
+
+[tool.black]
+line-length = 88
+
 [dependency-groups]
 dev = [
     "black>=25.1.0",
