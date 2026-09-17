@@ -14,6 +14,10 @@ from email.message import EmailMessage
 
 APP_NAME = "Super AI"
 
+# Resend blocks requests that don't send a real User-Agent header (403 / error
+# code 1010), so identify this application explicitly.
+USER_AGENT = "Super-AI/1.0 (+https://super-ai.amrahaz.me)"
+
 GRADIENT = "linear-gradient(135deg, #7a5cff 0%, #2e7bff 100%)"
 
 
@@ -141,6 +145,7 @@ def _send_via_resend(to: str, subject: str, html: str) -> None:
         headers={
             "Authorization": f"Bearer {config['api_key']}",
             "Content-Type": "application/json",
+            "User-Agent": USER_AGENT,
         },
     )
     try:

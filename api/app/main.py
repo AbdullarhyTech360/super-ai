@@ -1,6 +1,7 @@
 import json
 import os
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Annotated
 
 import jwt
@@ -13,6 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
 from sqlmodel import Session
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from app.db.database import create_db_and_tables
 from app.db.session import get_session
@@ -40,8 +43,6 @@ from app.services.uploads import (
     save_image_upload,
     save_upload,
 )
-
-load_dotenv()
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "your_secret_key_here")
 ALGORITHM = os.environ.get("ALGORITHM", "HS256")
@@ -116,6 +117,7 @@ def read_root():
 def startup_event():
     # Perform any startup tasks here, such as initializing resources or connections
     print("Starting up the application...")
+    _log_email_config()
     create_db_and_tables()
     migrate_schema()
 
@@ -138,6 +140,20 @@ def migrate_schema():
         conn.execute(
             text('UPDATE "user" SET is_verified = TRUE WHERE is_verified IS NULL')
         )
+
+
+def _log_email_config() -> None:
+    """Log the resolved email configuration so the active provider is visible
+    in the deployment logs (secrets are never printed)."""
+    from app.services.email import _config
+
+    config = _config()
+    print(
+        "[config] email provider = "
+        f"{config['provider']} | from = {config['from']} | "
+        f"resend key set = {'yes' if config['api_key'] else 'no'} | "
+        f"frontend base = {FRONTEND_BASE_URL}"
+    )
 
 
 def _verification_token(email: str) -> str:
