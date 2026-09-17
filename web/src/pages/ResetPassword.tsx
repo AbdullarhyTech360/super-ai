@@ -10,6 +10,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL } from '@/lib/api';
+import Seo from '@/components/Seo';
 
 const resetPasswordSchema = z
   .object({
@@ -74,10 +75,12 @@ const ResetPassword = () => {
   };
 
   return (
-    <AuthShell
-      headline="Create a new password"
-      subheadline="Choose a strong password you haven't used before."
-    >
+    <>
+      <Seo />
+      <AuthShell
+        headline="Create a new password"
+        subheadline="Choose a strong password you haven't used before."
+      >
       <div className="text-center mb-8">
         <div className="w-fit mx-auto">
           <h1 className="text-2xl font-bold text-foreground">Reset Password</h1>
@@ -156,6 +159,7 @@ const ResetPassword = () => {
         </p>
       </div>
     </AuthShell>
+    </>
   );
 };
 

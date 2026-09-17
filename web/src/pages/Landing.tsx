@@ -18,6 +18,8 @@ import Navbar from '@/components/Navbar';
 import AppLogo from '@/components/AppLogo';
 import AiBanner from '@/components/AiBanner';
 import MarkdownMessage from '@/components/MarkdownMessage';
+import Seo from '@/components/Seo';
+import { softwareJsonLd, websiteJsonLd } from '@/seo/routes';
 import { useAuth } from '@/hooks/useAuth';
 
 const Landing = () => {
@@ -85,6 +87,7 @@ const Landing = () => {
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      <Seo jsonLd={[softwareJsonLd, websiteJsonLd]} />
       <Navbar />
 
       {/* Hero Section */}

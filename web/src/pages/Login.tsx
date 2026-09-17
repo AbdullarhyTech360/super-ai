@@ -13,6 +13,7 @@ import { z } from 'zod';
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/useAuth';
 import { API_BASE_URL } from '@/lib/api';
+import Seo from '@/components/Seo';
 
 const loginSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -126,10 +127,12 @@ const Login = () => {
   };
 
   return (
-    <AuthShell
-      headline="Welcome back"
-      subheadline="Sign in to continue your conversations."
-    >
+    <>
+      <Seo />
+      <AuthShell
+        headline="Welcome back"
+        subheadline="Sign in to continue your conversations."
+      >
       <div className="text-center mb-8">
         <div className="w-fit mx-auto">
           <h1 className="text-2xl font-bold text-foreground">Sign In</h1>
@@ -298,6 +301,7 @@ const Login = () => {
         </p>
       </div>
     </AuthShell>
+    </>
   );
 };
 

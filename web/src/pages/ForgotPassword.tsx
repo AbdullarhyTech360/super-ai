@@ -11,6 +11,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL } from '@/lib/api';
+import Seo from '@/components/Seo';
 
 const forgotPasswordSchema = z.object({
   email: z.string().email('Please enter a valid email address'),
@@ -59,10 +60,12 @@ const ForgotPassword = () => {
   };
 
   return (
-    <AuthShell
-      headline="Reset your password"
-      subheadline="We'll send you a secure link to set a new password."
-    >
+    <>
+      <Seo />
+      <AuthShell
+        headline="Reset your password"
+        subheadline="We'll send you a secure link to set a new password."
+      >
       <div className="text-center mb-8">
         <div className="w-fit mx-auto">
           <h1 className="text-2xl font-bold text-foreground">Forgot Password</h1>
@@ -152,6 +155,7 @@ const ForgotPassword = () => {
         </p>
       </div>
     </AuthShell>
+    </>
   );
 };
 

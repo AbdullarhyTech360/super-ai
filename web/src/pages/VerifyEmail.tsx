@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { API_BASE_URL } from '@/lib/api';
+import Seo from '@/components/Seo';
 
 type VerifyStatus = 'verifying' | 'success' | 'error';
 
@@ -104,10 +105,12 @@ const VerifyEmail = () => {
   };
 
   return (
-    <AuthShell
-      headline="Confirm your email"
-      subheadline="Activate your account to start using Super AI."
-    >
+    <>
+      <Seo />
+      <AuthShell
+        headline="Confirm your email"
+        subheadline="Activate your account to start using Super AI."
+      >
       <div className="text-center mb-8">
         <div className="w-fit mx-auto">
           <h1 className="text-2xl font-bold text-foreground">Email Verification</h1>
@@ -207,6 +210,7 @@ const VerifyEmail = () => {
         Your data is encrypted and secure
       </p>
     </AuthShell>
+    </>
   );
 };
 

@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
 import { API_BASE_URL } from '@/lib/api';
+import Seo from '@/components/Seo';
 
 const signupSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters long'),
@@ -142,10 +143,12 @@ const Signup = () => {
   };
 
   return (
-    <AuthShell
-      headline="Create your Super AI account"
-      subheadline="Join thousands of users chatting smarter with AI."
-    >
+    <>
+      <Seo />
+      <AuthShell
+        headline="Create your Super AI account"
+        subheadline="Join thousands of users chatting smarter with AI."
+      >
       <div className="text-center mb-8">
         <div className="w-fit mx-auto">
           <h1 className="text-2xl font-bold text-foreground">Create Account</h1>
@@ -402,6 +405,7 @@ const Signup = () => {
         </p>
       </div>
     </AuthShell>
+    </>
   );
 };
 
