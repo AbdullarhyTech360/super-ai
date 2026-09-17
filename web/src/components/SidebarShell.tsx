@@ -132,7 +132,7 @@ const SidebarShell = ({
       <div className={cn(
         "fixed inset-y-0 left-0 z-50 bg-card/95 backdrop-blur-md border-r border-border transition-all duration-300 ease-in-out shadow-elegant",
         isMobile && (isSidebarOpen ? "translate-x-0" : "-translate-x-full"),
-        isSidebarOpen ? "w-80" : "w-16"
+        isSidebarOpen ? "w-80 max-w-[85vw]" : "w-16"
       )}>
         {/* Expanded sidebar */}
         <div className={cn(

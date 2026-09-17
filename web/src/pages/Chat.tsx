@@ -1743,12 +1743,12 @@ const Chat = () => {
               <div className="relative flex-1 min-w-0">
                 <Textarea
                   ref={textareaRef}
-                  placeholder="Message Super AI... (Enter to send, Shift+Enter for new line)"
+                  placeholder="type your message here..."
                   value={newMessage}
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
                   aria-label="Message Super AI"
-                  className="w-full min-h-[52px] max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 pl-11 pr-[76px] py-3 text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  className="w-full min-h-11 max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 pl-11 pr-[76px] py-2.5 text-base sm:text-sm text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
                   rows={1}
                 />
 
@@ -1786,7 +1786,7 @@ const Chat = () => {
                   >
                     <EmojiPicker
                       height={380}
-                      width={320}
+                      width={Math.min(320, window.innerWidth - 24)}
                       lazyLoadEmojis
                       theme={theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches) ? EmojiTheme.DARK : EmojiTheme.LIGHT}
                       onEmojiClick={handleEmojiClick}

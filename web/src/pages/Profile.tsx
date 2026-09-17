@@ -128,13 +128,13 @@ const Profile = () => {
                   </Avatar>
                 </div>
                 
-                <div className="flex-1 text-center sm:text-left">
-                  <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2">{displayName}</h1>
+                <div className="flex-1 min-w-0 text-center sm:text-left">
+                  <h1 className="text-2xl sm:text-3xl font-bold text-foreground mb-2 break-words">{displayName}</h1>
                   
                   <div className="flex flex-wrap justify-center sm:justify-start gap-4 text-sm text-muted-foreground">
-                    <div className="flex items-center gap-1">
-                      <Mail className="w-4 h-4" />
-                      <span>{user.email}</span>
+                    <div className="flex items-center gap-1 min-w-0">
+                      <Mail className="w-4 h-4 flex-shrink-0" />
+                      <span className="break-all">{user.email}</span>
                     </div>
                   </div>
                 </div>
@@ -142,34 +142,34 @@ const Profile = () => {
             </CardContent>
           </Card>
 
-          <div className="grid gap-6 md:grid-cols-2">
+          <div className="grid min-w-0 gap-6 md:grid-cols-2">
             {/* Statistics */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+            <Card className="min-w-0">
+              <CardHeader className="min-w-0">
+                <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
                   <Award className="w-5 h-5" />
                   Statistics
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Total Conversations</span>
-                  <Badge variant="secondary" className="font-bold">
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <span className="min-w-0 break-words text-muted-foreground">Total Conversations</span>
+                  <Badge variant="secondary" className="shrink-0 font-bold">
                     {conversations.length}
                   </Badge>
                 </div>
                 <Separator />
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">Messages Sent</span>
-                  <Badge variant="secondary" className="font-bold">
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <span className="min-w-0 break-words text-muted-foreground">Messages Sent</span>
+                  <Badge variant="secondary" className="shrink-0 font-bold">
                     {userMessages.length.toLocaleString()}
                   </Badge>
                 </div>
                 <Separator />
-                <div className="flex justify-between items-center">
-                  <span className="text-muted-foreground">This Month</span>
-                  <Badge 
-                    className="text-primary-foreground font-bold"
+                <div className="flex min-w-0 items-center justify-between gap-3">
+                  <span className="min-w-0 break-words text-muted-foreground">This Month</span>
+                  <Badge
+                    className="shrink-0 text-primary-foreground font-bold"
                     style={{ background: 'var(--gradient-primary)' }}
                   >
                     {thisMonthMessages.length.toLocaleString()} messages
@@ -179,29 +179,29 @@ const Profile = () => {
             </Card>
 
             {/* Contact Information */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+            <Card className="min-w-0">
+              <CardHeader className="min-w-0">
+                <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
                   <User className="w-5 h-5" />
                   Contact Information
                 </CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <User className="w-4 h-4 text-muted-foreground" />
-                  <span className="truncate">Account ID: {user.id}</span>
+              <CardContent className="space-y-4 min-w-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <User className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <span className="truncate min-w-0">Account ID: {user.id}</span>
                 </div>
-                <div className="flex items-center gap-3">
-                  <Mail className="w-4 h-4 text-muted-foreground" />
-                  <span>{user.email}</span>
+                <div className="flex items-center gap-3 min-w-0">
+                  <Mail className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+                  <span className="break-all">{user.email}</span>
                 </div>
               </CardContent>
             </Card>
 
             {/* Recent Activity */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
+            <Card className="min-w-0">
+              <CardHeader className="min-w-0">
+                <CardTitle className="flex min-w-0 flex-wrap items-center gap-2">
                   <MessageCircle className="w-5 h-5" />
                   Recent Activity
                 </CardTitle>
