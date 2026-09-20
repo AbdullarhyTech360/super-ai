@@ -1,21 +1,64 @@
-version: '3.8'
 services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: super-ai-db
+    environment:
+      POSTGRES_USER: superai
+      POSTGRES_PASSWORD: superai
+      POSTGRES_DB: superai
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U superai -d superai"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   backend:
     build: ./api
-    command: pdm run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    container_name: super-ai-backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     ports:
       - "8000:8000"
     volumes:
-      - ./api:/app
+      # Mount only the source; keep installed deps and uploaded files intact
+      - ./api/app:/app/app
+      - uploads_data:/app/data/uploads
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=${DATABASE_URL}
+      # Local dev database (the pgvector service above).
+      # DB_SSLMODE=disable matches local Postgres, which has no TLS.
+      - DATABASE_URL=postgresql+psycopg2://superai:superai@db:5432/superai
+      - DB_SSLMODE=disable
+      - CORS_ORIGINS=http://localhost:3000,http://localhost:5173,http://localhost:8080
+      - FRONTEND_BASE_URL=http://localhost:3000
+      # Secrets (GEMINI_API_KEY, SERPER_API_KEY, SECRET_KEY, ...) come from api/.env
+    env_file:
+      - ./api/.env
+    depends_on:
+      db:
+        condition: service_healthy
+
   frontend:
     build: ./web
-    command: npm run dev
+    container_name: super-ai-frontend
+    command: npm run dev -- --host 0.0.0.0 --port 5173
     ports:
-      - "3000:3000"
+      - "3000:3000"   # host 3000 -> container 5173 keeps your existing URLs working
     volumes:
-      - ./web:/app
+      # Mount only source; node_modules stays inside the container
+      - ./web/src:/app/src
+      - ./web/public:/app/public
+      - ./web/index.html:/app/index.html
+      - ./web/vite.config.ts:/app/vite.config.ts
     environment:
-      - NODE_ENV=development 
+      - NODE_ENV=development
+      - VITE_API_BASE_URL=http://localhost:8000
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+  uploads_data:

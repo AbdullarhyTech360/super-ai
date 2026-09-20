@@ -17,7 +17,7 @@ from sqlmodel import Session
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-from app.db.database import create_db_and_tables
+from app.db.database import create_db_and_tables, engine
 from app.db.session import get_session
 from app.models.forms import Login, SignUp
 from app.models.user import User
@@ -31,6 +31,8 @@ from app.schemas.user import (
     VerifyEmailRequest,
 )
 from app.services.conversation_ai import (
+    MODEL_PROFILES,
+    resolve_model,
     send_message_stream,
     send_message_stream_with_title,
 )
@@ -50,6 +52,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", 
 RESET_TOKEN_EXPIRE_MINUTES = int(os.environ.get("RESET_TOKEN_EXPIRE_MINUTES", "30"))
 VERIFY_TOKEN_EXPIRE_MINUTES = int(os.environ.get("VERIFY_TOKEN_EXPIRE_MINUTES", "30"))
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
+
+# Every turn re-sends the conversation history to the model, so it is capped:
+# an unbounded transcript makes each answer slower than the last.
+HISTORY_MAX_MESSAGES = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES", "20"))
+HISTORY_MAX_CHARS = int(os.environ.get("CHAT_HISTORY_MAX_CHARS", "12000"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/user")
 
@@ -108,6 +115,27 @@ def get_current_user(
     return user
 
 
+def _trim_history(
+    history: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    """Keep the newest turns within the message and character budgets.
+
+    The history is re-sent to the model on every turn, so without a cap both
+    the prompt and the time to first token grow with the conversation length.
+    """
+    if not history:
+        return []
+    kept: list[tuple[str, str]] = []
+    budget = HISTORY_MAX_CHARS
+    for sender, text in reversed(history[-HISTORY_MAX_MESSAGES:]):
+        if kept and len(text) > budget:
+            break
+        budget -= len(text)
+        kept.append((sender, text))
+    kept.reverse()
+    return kept
+
+
 @app.get("/")
 def read_root():
     return {"message": "Hello, World!"}
@@ -127,6 +155,10 @@ def migrate_schema():
     from sqlalchemy import text
 
     from app.db.database import engine
+    from app.services import rag
+
+    if rag.is_enabled():
+        rag.ensure_schema(engine)
 
     with engine.begin() as conn:
         # Column is added WITHOUT a default so existing rows become NULL and are
@@ -558,6 +590,7 @@ def chat_with_ai(
     persist: Annotated[bool, Form()] = True,
     history: Annotated[str, Form()] = "",
     files: Annotated[list[UploadFile], File()] = [],
+    model: Annotated[str, Form()] = "auto",
 ):
     from app.models.chat import Attachment, Conversation, Message
 
@@ -601,21 +634,31 @@ def chat_with_ai(
 
     history_list: list[tuple[str, str]] = []
     if conversation is not None:
-        history_list = [
-            (message.sender, message.text)
-            for message in session.query(Message)
+        # Only the newest turns are loaded: the whole transcript is never
+        # needed, and fetching it made long chats slower to answer.
+        recent_messages = (
+            session.query(Message)
             .filter(Message.conversation_id == conversation.id)
-            .order_by(Message.created_at)
+            .order_by(Message.created_at.desc())
+            .limit(HISTORY_MAX_MESSAGES)
             .all()
-        ]
+        )
+        history_list = _trim_history(
+            [
+                (message.sender, message.text)
+                for message in reversed(recent_messages)
+            ]
+        )
     elif history.strip():
         try:
             parsed_history = json.loads(history)
-            history_list = [
-                (item.get("sender", ""), item.get("text", ""))
-                for item in parsed_history
-                if isinstance(item, dict)
-            ][-40:]
+            history_list = _trim_history(
+                [
+                    (item.get("sender", ""), item.get("text", ""))
+                    for item in parsed_history
+                    if isinstance(item, dict)
+                ]
+            )
         except (ValueError, TypeError):
             history_list = []
 
@@ -650,6 +693,85 @@ def chat_with_ai(
         for meta in attachment_meta
     ]
 
+    from app.services import rag
+    from app.services.search_grounding import search_web, should_search
+
+    profile = resolve_model(model or "auto", input_text, bool(ai_parts))
+    model_label = profile.label
+
+    # Index text uploads so future turns can be grounded in them (best-effort).
+    rag_enabled = rag.is_enabled() and persist and conversation is not None
+    paragraph_texts: list[dict] = []
+    if rag_enabled:
+        from app.services.uploads import is_text_like
+
+        for meta in attachment_meta:
+            if not is_text_like(meta["mime_type"]):
+                continue
+            path = UPLOADS_DIR / current_user.id / meta["generated_name"]
+            if not path.exists():
+                continue
+            try:
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                content = None
+            if content and content.strip():
+                paragraph_texts.append(
+                    {
+                        "attachment_id": meta["id"],
+                        "filename": meta["filename"],
+                        "content": content,
+                    }
+                )
+
+    # Ground the current turn: web search for factual/current questions, RAG
+    # over previously uploaded files in this conversation. Resolved lazily
+    # inside the stream generator (see below) so the response opens first.
+    rag_conversation_id = (
+        conversation.id
+        if rag.is_enabled() and conversation is not None
+        else None
+    )
+
+    def gather_grounding() -> tuple[list[dict] | None, str]:
+        """Fetch web and file grounding concurrently.
+
+        Both lookups are independent network round-trips, so running them
+        together costs one wait instead of two added to every answer.
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        web: list[dict] | None = None
+        context = ""
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            search_future = (
+                pool.submit(search_web, input_text[:300])
+                if should_search(input_text)
+                else None
+            )
+            rag_future = (
+                pool.submit(
+                    rag.retrieve_context,
+                    session,
+                    current_user.id,
+                    rag_conversation_id,
+                    input_text,
+                )
+                if rag_conversation_id is not None
+                else None
+            )
+            if search_future is not None:
+                try:
+                    web = search_future.result()
+                except Exception:
+                    web = None
+            if rag_future is not None:
+                try:
+                    context = rag_future.result()
+                except Exception:
+                    context = ""
+        return web, context
+
     def stream_response():
         import json
 
@@ -661,36 +783,65 @@ def chat_with_ai(
                 "conversation_id": response_conversation_id,
                 "title": fallback_title if is_new or conversation_id is None else None,
                 "attachments": start_attachments,
+                "model": model_label,
             }
         ) + "\n"
 
+        web_results, rag_context = gather_grounding()
+
         response_parts = []
-        if is_new or conversation_id is None:
-            if persist and conversation is not None:
-                stream = send_message_stream_with_title(
-                    input_text, history_list, ai_parts
-                )
-                title = ""
-                for event_type, value in stream:
-                    if event_type == "title":
-                        title = " ".join(value.split())[:50].strip()
-                        if not title:
-                            title = input_text[:50]
-                        conversation.title = title
-                        session.add(conversation)
-                        session.commit()
-                        yield json.dumps({"type": "title", "title": title}) + "\n"
-                    else:
-                        response_parts.append(value)
-                        yield json.dumps({"type": "chunk", "text": value}) + "\n"
+        try:
+            if is_new or conversation_id is None:
+                if persist and conversation is not None:
+                    stream = send_message_stream_with_title(
+                        input_text,
+                        history_list,
+                        ai_parts,
+                        model_preference=model or "auto",
+                        web_results=web_results,
+                        rag_context=rag_context,
+                    )
+                    title = ""
+                    for event_type, value in stream:
+                        if event_type == "title":
+                            title = " ".join(value.split())[:50].strip()
+                            if not title:
+                                title = input_text[:50]
+                            conversation.title = title
+                            session.add(conversation)
+                            session.commit()
+                            yield json.dumps({"type": "title", "title": title}) + "\n"
+                        else:
+                            response_parts.append(value)
+                            yield json.dumps({"type": "chunk", "text": value}) + "\n"
+                else:
+                    for chunk in send_message_stream(
+                        input_text,
+                        history_list,
+                        ai_parts,
+                        model_preference=model or "auto",
+                        web_results=web_results,
+                        rag_context=rag_context,
+                    ):
+                        response_parts.append(chunk)
+                        yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
             else:
-                for chunk in send_message_stream(input_text, history_list, ai_parts):
+                for chunk in send_message_stream(
+                    input_text,
+                    history_list,
+                    ai_parts,
+                    model_preference=model or "auto",
+                    web_results=web_results,
+                    rag_context=rag_context,
+                ):
                     response_parts.append(chunk)
                     yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
-        else:
-            for chunk in send_message_stream(input_text, history_list, ai_parts):
-                response_parts.append(chunk)
-                yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
+        except Exception as exc:
+            print(f"[chat] stream error: {exc}")
+            error_detail = (
+                str(exc) if exc else "An unexpected error occurred"
+            )
+            yield json.dumps({"type": "error", "detail": error_detail}) + "\n"
 
         response = "".join(response_parts)
 
@@ -725,11 +876,25 @@ def chat_with_ai(
             conversation.updated_at = datetime.now(timezone.utc)
             session.add(conversation)
             session.commit()
+
+            if paragraph_texts:
+                rag.index_attachments(
+                    session,
+                    current_user.id,
+                    conversation.id,
+                    paragraph_texts,
+                )
         yield json.dumps({"type": "done"}) + "\n"
 
     return StreamingResponse(
         stream_response(),
         media_type="application/x-ndjson",
+        headers={
+            # Keep reverse proxies from buffering the tokens: without this the
+            # whole answer can arrive at once when the stream finally closes.
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 
@@ -814,6 +979,11 @@ def delete_conversation(
     for stored_path in stored_paths:
         target = UPLOADS_DIR / current_user.id / stored_path
         target.unlink(missing_ok=True)
+
+    from app.services import rag
+
+    if rag.is_enabled():
+        rag.delete_conversation_chunks(engine, [conversation.id])
     return {"message": "Conversation was deleted successfully."}
 
 
@@ -858,6 +1028,11 @@ def bulk_delete_conversations(
     for stored_path in stored_paths:
         target = UPLOADS_DIR / current_user.id / stored_path
         target.unlink(missing_ok=True)
+
+    from app.services import rag
+
+    if rag.is_enabled():
+        rag.delete_conversation_chunks(engine, conversation_ids_found)
 
     return {
         "message": f"{len(conversations)} conversation(s) deleted successfully.",

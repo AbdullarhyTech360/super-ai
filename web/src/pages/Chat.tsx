@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { Send, Plus, Search, X, Paperclip, Mic, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2, Smile, Pause, Play, MessageSquareDashed, MoreHorizontal } from 'lucide-react';
+import { Send, Plus, Search, X, Paperclip, Mic, Pencil, Copy, Check, ListFilter, SquarePen, FileText, ListChecks, Trash2, Smile, Pause, Play, MessageSquareDashed, MoreHorizontal, Sparkles, ChevronDown } from 'lucide-react';
 import EmojiPicker, { type EmojiClickData, Theme as EmojiTheme } from 'emoji-picker-react';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
@@ -45,6 +45,7 @@ interface Message {
   sender: 'user' | 'ai';
   timestamp: Date;
   attachments?: Attachment[];
+  model?: string;
 }
 
 interface Attachment {
@@ -186,6 +187,13 @@ const getSpeechRecognition = (): SpeechRecognitionConstructor | null => {
   return win.SpeechRecognition ?? win.webkitSpeechRecognition ?? null;
 };
 
+const MODEL_OPTIONS = [
+  { id: 'auto', label: 'Super AI Auto', description: 'Fastest model that fits your question' },
+  { id: 'lite', label: 'Super AI Lite', description: 'Fast and lightweight' },
+  { id: 'balanced', label: 'Super AI Balanced', description: 'Accurate and well-reasoned' },
+  { id: 'pro', label: 'Super AI Pro', description: 'Deepest reasoning' },
+];
+
 const Chat = () => {
   const activeConversationStorageKey = 'active_conversation_id';
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -215,6 +223,7 @@ const Chat = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isNearBottomRef = useRef(true);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [conversationToDelete, setConversationToDelete] = useState<string | null>(null);
   const [isMultiSelect, setIsMultiSelect] = useState(false);
@@ -230,12 +239,17 @@ const Chat = () => {
   const [chatTheme, setChatTheme] = useState<ChatTheme>(
     () => getChatTheme(localStorage.getItem('chatTheme'))
   );
+  const [modelPreference, setModelPreference] = useState(() => {
+    const saved = localStorage.getItem('superAiModelPreference');
+    return saved && MODEL_OPTIONS.some(option => option.id === saved) ? saved : 'auto';
+  });
   const isInitialActiveConversation = useRef(true);
   const conversationsRef = useRef<Conversation[]>(conversations);
   const streamQueueRef = useRef<string[]>([]);
   const streamDisplayTextRef = useRef('');
   const streamConversationIdRef = useRef<string | null>(null);
   const streamMessageIdRef = useRef<string | null>(null);
+  const streamModelLabelRef = useRef<string>('');
   const streamDoneRef = useRef(false);
   const streamRevealTimerRef = useRef<number | null>(null);
   const voiceActionsRef = useRef<{
@@ -250,6 +264,11 @@ const Chat = () => {
     const next = getChatTheme(id);
     setChatTheme(next);
     localStorage.setItem('chatTheme', next.id);
+  };
+
+  const handleModelChange = (id: string) => {
+    setModelPreference(id);
+    localStorage.setItem('superAiModelPreference', id);
   };
 
   const handleCopyMessage = useCallback(async (messageId: string, text: string) => {
@@ -633,8 +652,32 @@ const Chat = () => {
     textareaRef.current?.focus();
   }, []);
 
+  // Track whether the user is still following the latest message, so streaming
+  // updates never yank the view back down while they are reading earlier text.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const viewport = messagesEndRef.current?.closest(
+      '[data-radix-scroll-area-viewport]'
+    ) as HTMLElement | null;
+    if (!viewport) return;
+    const onScroll = () => {
+      isNearBottomRef.current =
+        viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight < 120;
+    };
+    onScroll();
+    viewport.addEventListener('scroll', onScroll, { passive: true });
+    return () => viewport.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!isNearBottomRef.current) return;
+    // Tokens arrive roughly every 30ms while an answer streams, and a smooth
+    // scroll animation restarted that often never settles, which made the page
+    // feel slow. Jump instantly while streaming, animate only otherwise.
+    const streaming = !streamDoneRef.current || streamQueueRef.current.length > 0;
+    messagesEndRef.current?.scrollIntoView({
+      behavior: streaming ? 'auto' : 'smooth',
+      block: 'end',
+    });
   }, [conversations, isTyping]);
 
   useEffect(() => () => {
@@ -907,8 +950,10 @@ const Chat = () => {
     if (streamRevealTimerRef.current) return;
 
     streamRevealTimerRef.current = window.setInterval(() => {
-      const nextWord = streamQueueRef.current.shift();
-      if (!nextWord) {
+      // Reveal adaptively: 1 word at a time when the stream trickles in,
+      // but burst through any backlog so long answers don't lag behind.
+      const backlog = streamQueueRef.current.length;
+      if (!backlog) {
         if (streamDoneRef.current) {
           window.clearInterval(streamRevealTimerRef.current!);
           streamRevealTimerRef.current = null;
@@ -917,7 +962,15 @@ const Chat = () => {
         return;
       }
 
-      streamDisplayTextRef.current += nextWord;
+      const burst = Math.min(6, Math.max(1, Math.ceil(backlog / 30)));
+      let taken = '';
+      for (let i = 0; i < burst; i += 1) {
+        const word = streamQueueRef.current.shift();
+        if (!word) break;
+        taken += word;
+      }
+
+      streamDisplayTextRef.current += taken;
       const conversationId = streamConversationIdRef.current;
       const messageId = streamMessageIdRef.current;
       if (!conversationId || !messageId) return;
@@ -940,11 +993,12 @@ const Chat = () => {
                 text: streamDisplayTextRef.current,
                 sender: 'ai',
                 timestamp: new Date(),
+                model: streamModelLabelRef.current || undefined,
               }],
           updatedAt: new Date(),
         };
       }));
-    }, 45);
+    }, 30);
   };
 
   const handleSendMessage = useCallback((overrideText?: string) => {
@@ -1007,6 +1061,7 @@ const Chat = () => {
       streamDisplayTextRef.current = '';
       streamConversationIdRef.current = responseConversationId;
       streamMessageIdRef.current = `ai-${Date.now()}`;
+      streamModelLabelRef.current = '';
       streamDoneRef.current = false;
       let notificationTitle = conversationsRef.current.find(conv => conv.id === (activeConversation ?? localConversationId))?.title || 'Super AI';
 
@@ -1029,6 +1084,7 @@ const Chat = () => {
         if (activeConversation) {
           formData.append('conversation_id', activeConversation);
         }
+        formData.append('model', modelPreference);
         sentAttachments.forEach(attachment => formData.append('files', attachment.file));
 
         const response = await authenticatedFetch(`${API_BASE_URL}/api/chat`, {
@@ -1068,6 +1124,7 @@ const Chat = () => {
             if (event.type === 'start') {
               responseConversationId = event.conversation_id;
               streamConversationIdRef.current = responseConversationId;
+              streamModelLabelRef.current = event.model ?? '';
               setActiveConversation(responseConversationId);
               setConversations(prev => prev.map(conv =>
                 conv.id === localConversationId
@@ -1098,6 +1155,9 @@ const Chat = () => {
               ));
             } else if (event.type === 'chunk') {
               enqueueStreamText(event.text);
+            } else if (event.type === 'error') {
+              const errorMsg = event.detail || 'The AI encountered an error. Please try again.';
+              throw new Error(errorMsg);
             } else if (event.type === 'done') {
               streamFinished = true;
               streamDoneRef.current = true;
@@ -1133,7 +1193,7 @@ const Chat = () => {
         return;
       }
     })();
-  }, [newMessage, activeConversation, pendingAttachments, pendingTemporary, authenticatedFetch, toast]);
+  }, [newMessage, activeConversation, pendingAttachments, pendingTemporary, authenticatedFetch, toast, modelPreference]);
 
   const handleKeyPress = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey && !(e.metaKey || e.ctrlKey)) {
@@ -1542,6 +1602,12 @@ const Chat = () => {
                       <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-card-foreground text-left shadow-md min-w-0">
                         <AiBanner />
                         <MarkdownMessage content={message.text} />
+                        {message.model && (
+                          <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-border/70 bg-muted/40 px-2 py-0.5 text-[10px] text-muted-foreground whitespace-nowrap">
+                            <Sparkles className="w-3 h-3" />
+                            {message.model}
+                          </div>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1810,15 +1876,50 @@ const Chat = () => {
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="group h-10 gap-2 rounded-full border-border/70 bg-card/60 px-4 text-muted-foreground hover:bg-hover-muted hover:text-foreground hover:border-primary/40 smooth-transition"
+                      aria-label="Select AI model"
+                      title="Choose which Super AI model answers"
+                    >
+                      <Sparkles className="w-4 h-4 text-primary" />
+                      <span className="text-sm font-medium whitespace-nowrap hidden sm:inline">
+                        {MODEL_OPTIONS.find(option => option.id === modelPreference)?.label}
+                      </span>
+                      <ChevronDown className="w-4 h-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+                      Super AI model
+                    </DropdownMenuLabel>
+                    <DropdownMenuRadioGroup value={modelPreference} onValueChange={handleModelChange}>
+                      {MODEL_OPTIONS.map(option => (
+                        <DropdownMenuRadioItem key={option.id} value={option.id}>
+                          <span className="flex flex-col gap-1">
+                            <span className="text-sm font-medium">{option.label}</span>
+                            <span className="text-sm text-muted-foreground font-normal">
+                              {option.description}
+                            </span>
+                          </span>
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
                 {(newMessage.trim() || pendingAttachments.length > 0) && (
                   <Button
                     onClick={() => handleSendMessage()}
                     disabled={isTyping}
                     size="sm"
-                    className="h-8 w-8 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
+                    className="h-10 w-10 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
                     style={{ background: 'var(--gradient-primary)' }}
                   >
-                    <Send className="w-4 h-4" />
+                    <Send className="w-5 h-5" />
                   </Button>
                 )}
               </div>
