@@ -33,6 +33,10 @@ interface SidebarShellProps {
   hideProfileNav?: boolean;
   title?: ReactNode;
   subtitle?: string;
+  /** Rendered in the page header, right next to the title (e.g. a model picker). */
+  headerExtra?: ReactNode;
+  /** Classes for the `headerExtra` container — use to control breakpoint visibility. */
+  headerExtraClassName?: string;
   scrollable?: boolean;
   children: ReactNode;
 }
@@ -53,6 +57,8 @@ const SidebarShell = ({
   hideProfileNav,
   title,
   subtitle,
+  headerExtra,
+  headerExtraClassName,
   scrollable = true,
   children,
 }: SidebarShellProps) => {
@@ -348,6 +354,11 @@ const SidebarShell = ({
               )}
               {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
             </div>
+            {headerExtra && (
+              <div className={cn('flex items-center self-center flex-shrink-0', headerExtraClassName)}>
+                {headerExtra}
+              </div>
+            )}
           </div>
           <nav className="flex items-center flex-shrink-0 gap-1">
             <DropdownMenu>

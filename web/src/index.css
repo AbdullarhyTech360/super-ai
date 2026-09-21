@@ -33,6 +33,7 @@ All colors MUST be HSL.
     --destructive-foreground: 0 0% 100%;
 
     --border: 220 13% 91%;
+    --border-strong: 220 13% 84%;
     --input: 220 13% 91%;
     --ring: 220 91% 58%;
 
@@ -105,6 +106,7 @@ All colors MUST be HSL.
     --destructive-foreground: 213 31% 91%;
 
     --border: 220 17% 14%;
+    --border-strong: 220 17% 27%;
     --input: 220 17% 14%;
     --ring: 220 91% 65%;
 
@@ -232,6 +234,14 @@ All colors MUST be HSL.
 
   .fast-transition {
     transition: var(--transition-fast);
+  }
+
+  /* Model selector (page header): a single fluid font-size drives the label AND
+     the icons (which are sized in `em`), so both stay proportional to the space
+     the trigger occupies. Rendered after Tailwind's generated utilities, so it
+     reliably overrides the Button base `text-sm`. */
+  .model-select-trigger {
+    font-size: clamp(0.8125rem, 0.28vw + 0.72rem, 0.875rem);
   }
   
   .modern-card {

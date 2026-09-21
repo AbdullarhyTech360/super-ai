@@ -14,6 +14,7 @@ import {
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
@@ -193,6 +194,87 @@ const MODEL_OPTIONS = [
   { id: 'balanced', label: 'Super AI Balanced', description: 'Accurate and well-reasoned' },
   { id: 'pro', label: 'Super AI Pro', description: 'Deepest reasoning' },
 ];
+
+interface ModelSelectorProps {
+  value: string;
+  onValueChange: (id: string) => void;
+  /**
+   * "header" — compact pill for the mobile page header.
+   * "composer" — full pill beside the send button (desktop).
+   */
+  variant?: 'header' | 'composer';
+  /** Extra classes for the trigger, e.g. breakpoint visibility. */
+  className?: string;
+}
+
+/**
+ * Model picker. Rendered once in the page header on mobile (where the composer
+ * is too cramped) and once beside the send button on desktop — the two
+ * instances are toggled purely by breakpoint, so only one is ever visible.
+ */
+const ModelSelector = ({ value, onValueChange, variant = 'header', className }: ModelSelectorProps) => {
+  const active = MODEL_OPTIONS.find(option => option.id === value) ?? MODEL_OPTIONS[0];
+  const isHeader = variant === 'header';
+  // Narrow header space on mobile — "Super AI Balanced" reads as "Balanced".
+  const shortLabel = active.label.replace('Super AI ', '');
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className={cn(
+            'group self-center rounded-full border-2 border-border-strong bg-card/60 text-muted-foreground smooth-transition hover:border-primary/40 hover:bg-hover-muted hover:text-foreground',
+            // h-11 matches the message Textarea (min-h-11) so the picker sits
+            // flush with the input instead of riding its bottom edge.
+            isHeader
+              ? 'model-select-trigger h-9 gap-1.5 px-2.5 sm:gap-2 sm:px-3'
+              : 'h-11 gap-2 px-4',
+            className
+          )}
+          aria-label={`Select AI model — current: ${active.label}`}
+          title="Choose which Super AI model answers"
+        >
+          <Sparkles className={cn('shrink-0 text-primary', isHeader ? '!h-[1.15em] !w-[1.15em]' : 'w-4 h-4')} />
+          <span className={cn('font-medium', !isHeader && 'whitespace-nowrap')}>
+            {isHeader ? shortLabel : active.label}
+          </span>
+          <ChevronDown
+            className={cn(
+              'shrink-0 transition-transform duration-200 group-data-[state=open]:rotate-180',
+              isHeader ? '!h-[1.15em] !w-[1.15em]' : 'w-4 h-4'
+            )}
+          />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent
+        align="end"
+        side={isHeader ? 'bottom' : 'top'}
+        sideOffset={8}
+        className="w-[min(18rem,calc(100vw_-_2rem))] rounded-xl border-2 border-border-strong shadow-modern"
+      >
+        <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
+          Super AI model
+        </DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <DropdownMenuRadioGroup value={value} onValueChange={onValueChange}>
+          {MODEL_OPTIONS.map(option => (
+            <DropdownMenuRadioItem key={option.id} value={option.id} className="pr-3">
+              <span className="flex flex-col gap-0.5">
+                <span className="text-sm font-medium">{option.label}</span>
+                <span className="text-xs leading-snug text-muted-foreground font-normal">
+                  {option.description}
+                </span>
+              </span>
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+};
 
 const Chat = () => {
   const activeConversationStorageKey = 'active_conversation_id';
@@ -1244,6 +1326,8 @@ const Chat = () => {
       scrollable={false}
       subtitle="Always here to help"
       hideProfileNav
+      headerExtra={<ModelSelector variant="header" value={modelPreference} onValueChange={handleModelChange} />}
+      headerExtraClassName="md:hidden"
       themeLabel={chatTheme.id === 'default' ? 'Default' : chatTheme.label}
       title={
         isEditingTitle && currentConversation ? (
@@ -1527,7 +1611,7 @@ const Chat = () => {
         className="relative flex-1 min-h-0 overflow-hidden"
         style={{ background: chatTheme.areaBg }}
       >
-        <ScrollArea className="h-full p-4 bg-transparent overflow-x-hidden">
+        <ScrollArea className="h-full p-3 sm:p-4 bg-transparent overflow-x-hidden">
         {currentConversation?.isTemporary && (
           <div className="max-w-4xl mx-auto w-full mb-3">
             <div className="flex items-center gap-2 px-3 py-2 rounded-xl border border-primary/30 bg-primary/5 text-sm text-foreground">
@@ -1547,11 +1631,11 @@ const Chat = () => {
                   )}
                 >
                   <div className={cn(
-                    "max-w-[80%] md:max-w-[70%] w-fit min-w-0 relative",
+                    "max-w-[88%] sm:max-w-[80%] md:max-w-[70%] w-fit min-w-0 relative",
                     message.sender === 'user' ? "ml-auto" : "mr-auto"
                   )}>
                     {message.sender === 'user' ? (
-                      <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-md px-4 py-3 text-sm text-left shadow-glow min-w-0">
+                      <div className="bg-primary text-primary-foreground rounded-2xl rounded-br-md px-3.5 py-2.5 text-sm text-left shadow-glow min-w-0 sm:px-4 sm:py-3">
                         {message.attachments && message.attachments.length > 0 && (
                           <div className="flex flex-wrap gap-2 mb-2">
                             {message.attachments.map(attachment => (
@@ -1587,7 +1671,7 @@ const Chat = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleCopyMessage(message.id, message.text)}
-                          className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
+                          className="absolute -bottom-2.5 right-1 h-7 w-7 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground sm:-bottom-3 sm:h-6 sm:w-6 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
                           aria-label="Copy message"
                           title="Copy message"
                         >
@@ -1599,7 +1683,7 @@ const Chat = () => {
                         </Button>
                       </div>
                     ) : (
-                      <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 text-sm text-card-foreground text-left shadow-md min-w-0">
+                      <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-3.5 py-2.5 text-sm text-card-foreground text-left shadow-md min-w-0 sm:px-4 sm:py-3">
                         <AiBanner />
                         <MarkdownMessage content={message.text} />
                         {message.model && (
@@ -1612,7 +1696,7 @@ const Chat = () => {
                           variant="ghost"
                           size="sm"
                           onClick={() => handleCopyMessage(message.id, message.text)}
-                          className="absolute -bottom-3 right-1 h-6 w-6 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground"
+                          className="absolute -bottom-2.5 right-1 h-7 w-7 p-0 rounded-full bg-background border border-border/70 text-muted-foreground shadow-sm opacity-100 transition-opacity fast-transition hover:bg-background hover:text-foreground sm:-bottom-3 sm:h-6 sm:w-6 sm:opacity-0 sm:group-hover:opacity-100 sm:focus-visible:opacity-100"
                           aria-label="Copy message"
                           title="Copy message"
                         >
@@ -1630,8 +1714,8 @@ const Chat = () => {
 
             {/* Typing Indicator */}
             {isTyping && (
-              <div className="max-w-[80%] md:max-w-[70%] w-fit min-w-0 mr-auto animate-slide-in mt-6">
-                <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-4 py-3 shadow-md">
+              <div className="max-w-[88%] sm:max-w-[80%] md:max-w-[70%] w-fit min-w-0 mr-auto animate-slide-in mt-6">
+                <div className="bg-card border border-border/60 rounded-2xl rounded-bl-md px-3.5 py-2.5 shadow-md sm:px-4 sm:py-3">
                   <AiBanner />
                   <div className="flex items-center gap-1.5 px-1 pt-1">
                     <span className="w-2 h-2 rounded-full bg-primary animate-bounce-subtle" />
@@ -1645,25 +1729,25 @@ const Chat = () => {
             <div ref={messagesEndRef} />
           </div>
         ) : (
-          <div className="flex items-center justify-center h-full">
-            <div className="text-center max-w-md mx-auto p-8">
-              <div className="mb-8">
-                <AppLogo size={96} className="mx-auto mb-6 animate-bounce" />
+          <div className="flex items-center justify-center min-h-full">
+            <div className="text-center max-w-md mx-auto px-2 py-6 sm:p-8">
+              <div className="mx-auto mb-4 h-16 w-16 sm:mb-6 sm:h-24 sm:w-24">
+                <AppLogo size={96} className="h-full w-full animate-bounce" />
               </div>
-              <h2 className="text-4xl font-bold gradient-text mb-4">
+              <h2 className="text-2xl font-bold gradient-text mb-3 sm:text-4xl sm:mb-4">
                 {getGreeting()}, {firstName}!
               </h2>
-              <p className="text-muted-foreground mb-8 text-lg">
+              <p className="text-muted-foreground mb-6 text-base sm:mb-8 sm:text-lg">
                 What's on your mind today?
               </p>
-              <div className="grid grid-cols-1 gap-4 text-sm">
+              <div className="grid grid-cols-1 gap-2.5 text-sm sm:gap-4">
                 {suggestionPrompts.map((prompt) => (
                   <button
                     key={prompt}
                     type="button"
                     onClick={() => handleSendMessage(prompt)}
                     disabled={isTyping}
-                    className="p-4 rounded-xl bg-card/50 backdrop-blur-sm hover:bg-card/80 cursor-pointer smooth-transition hover:shadow-modern border border-border/50 text-foreground disabled:opacity-50 disabled:cursor-not-allowed text-left"
+                    className="p-3.5 rounded-xl bg-card/50 backdrop-blur-sm hover:bg-card/80 cursor-pointer smooth-transition hover:shadow-modern border border-border/50 text-foreground disabled:opacity-50 disabled:cursor-not-allowed text-left sm:p-4"
                   >
                     &ldquo;{prompt}&rdquo;
                   </button>
@@ -1676,7 +1760,7 @@ const Chat = () => {
       </div>
 
       {/* Input Area */}
-      <div className="p-4 border-t border-border bg-background/95 backdrop-blur-md shadow-elegant">
+      <div className="p-3 sm:p-4 border-t border-border bg-background/95 backdrop-blur-md shadow-elegant">
         <div className="max-w-4xl mx-auto w-full">
           <input
             ref={fileInputRef}
@@ -1687,7 +1771,7 @@ const Chat = () => {
             aria-hidden="true"
             tabIndex={-1}
           />
-          <div className="p-2 bg-card/50 backdrop-blur-sm rounded-2xl border border-border shadow-modern hover:shadow-elegant smooth-transition w-full">
+          <div className="p-2 bg-card/50 backdrop-blur-sm rounded-2xl border-2 border-border-strong shadow-modern hover:shadow-elegant smooth-transition w-full">
             {pendingAttachments.length > 0 && (
               <div className="flex flex-wrap gap-2 pb-2">
                 {pendingAttachments.map(attachment => (
@@ -1725,27 +1809,30 @@ const Chat = () => {
             )}
 
             {voiceStatus !== 'idle' ? (
-            <div className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3 py-2.5">
+            <div className="flex items-center gap-2 rounded-xl border-2 border-border-strong bg-muted/30 px-2.5 py-2 sm:gap-3 sm:px-3 sm:py-2.5">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
                 onClick={discardVoiceRecording}
-                className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive fast-transition"
+                className="h-9 w-9 p-0 text-muted-foreground hover:text-destructive fast-transition sm:h-8 sm:w-8"
                 aria-label="Delete recording"
                 title="Delete recording"
               >
                 <Trash2 className="w-4 h-4" />
               </Button>
               <div className="flex-1 flex items-center gap-3 min-w-0">
-                <div className="flex items-end gap-[3px] h-7" aria-hidden="true">
+                <div className="flex items-end gap-[2px] h-7 sm:gap-[3px]" aria-hidden="true">
                   {Array.from({ length: 22 }).map((_, index) => {
                     const wave = 0.25 + 0.75 * Math.abs(Math.sin(voiceLevel * Math.PI * 2 + index * 0.45));
                     const height = Math.max(0.08, voiceLevel * wave);
                     return (
                       <span
                         key={index}
-                        className="w-[3px] rounded-full transition-all duration-75"
+                        className={cn(
+                          "w-[3px] rounded-full transition-all duration-75",
+                          index >= 12 && "hidden sm:block"
+                        )}
                         style={{
                           height: `${height * 100}%`,
                           background: voiceStatus === 'paused' ? 'var(--muted-foreground)' : 'var(--destructive)',
@@ -1772,7 +1859,7 @@ const Chat = () => {
                   variant="ghost"
                   size="sm"
                   onClick={pauseVoiceRecording}
-                  className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                  className="h-9 w-9 p-0 text-muted-foreground hover:text-foreground fast-transition sm:h-8 sm:w-8"
                   aria-label="Pause recording"
                   title="Pause recording"
                 >
@@ -1784,7 +1871,7 @@ const Chat = () => {
                   variant="ghost"
                   size="sm"
                   onClick={resumeVoiceRecording}
-                  className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground fast-transition"
+                  className="h-9 w-9 p-0 text-muted-foreground hover:text-foreground fast-transition sm:h-8 sm:w-8"
                   aria-label="Resume recording"
                   title="Resume recording"
                 >
@@ -1796,7 +1883,7 @@ const Chat = () => {
                 size="sm"
                 disabled={!voiceTranscript.trim()}
                 onClick={sendVoiceRecording}
-                className="h-8 w-8 p-0 smooth-transition hover:shadow-glow disabled:opacity-50"
+                className="h-9 w-9 p-0 smooth-transition hover:shadow-glow disabled:opacity-50 sm:h-8 sm:w-8"
                 style={{ background: 'var(--gradient-primary)' }}
                 aria-label="Send recording"
                 title="Send recording"
@@ -1814,7 +1901,7 @@ const Chat = () => {
                   onChange={(e) => setNewMessage(e.target.value)}
                   onKeyPress={handleKeyPress}
                   aria-label="Message Super AI"
-                  className="w-full min-h-11 max-h-60 resize-none overflow-y-auto rounded-xl border border-border/60 bg-muted/30 pl-11 pr-[76px] py-2.5 text-base sm:text-sm text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
+                  className="w-full min-h-11 max-h-60 resize-none overflow-y-auto rounded-xl border-2 border-border-strong bg-muted/30 pl-11 pr-[76px] py-2.5 text-base sm:text-sm text-foreground placeholder:text-muted-foreground leading-relaxed shadow-sm transition-colors focus-visible:border-primary/50 focus-visible:ring-2 focus-visible:ring-primary/20"
                   rows={1}
                 />
 
@@ -1823,7 +1910,7 @@ const Chat = () => {
                   variant="ghost"
                   size="sm"
                   onClick={() => fileInputRef.current?.click()}
-                  className="absolute bottom-2 left-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                  className="absolute bottom-1.5 left-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
                   aria-label="Attach a file"
                   title="Attach a file"
                 >
@@ -1836,7 +1923,7 @@ const Chat = () => {
                       type="button"
                       variant="ghost"
                       size="sm"
-                      className="absolute bottom-2 right-10 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                      className="absolute bottom-1.5 right-10 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
                       aria-label="Insert emoji"
                       title="Insert emoji (Ctrl+Shift+E)"
                     >
@@ -1866,7 +1953,7 @@ const Chat = () => {
                     variant="ghost"
                     size="sm"
                     onClick={startVoiceRecording}
-                    className="absolute bottom-2 right-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
+                    className="absolute bottom-1.5 right-2 z-10 h-8 w-8 p-0 text-muted-foreground hover:bg-hover-muted hover:text-foreground"
                     aria-label="Start voice recording"
                     title="Start voice recording (Ctrl+M)"
                   >
@@ -1876,47 +1963,19 @@ const Chat = () => {
               </div>
 
               <div className="flex items-center gap-2 flex-shrink-0">
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="group h-10 gap-2 rounded-full border-border/70 bg-card/60 px-4 text-muted-foreground hover:bg-hover-muted hover:text-foreground hover:border-primary/40 smooth-transition"
-                      aria-label="Select AI model"
-                      title="Choose which Super AI model answers"
-                    >
-                      <Sparkles className="w-4 h-4 text-primary" />
-                      <span className="text-sm font-medium whitespace-nowrap hidden sm:inline">
-                        {MODEL_OPTIONS.find(option => option.id === modelPreference)?.label}
-                      </span>
-                      <ChevronDown className="w-4 h-4 transition-transform duration-200 group-data-[state=open]:rotate-180" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-64">
-                    <DropdownMenuLabel className="text-xs font-medium text-muted-foreground">
-                      Super AI model
-                    </DropdownMenuLabel>
-                    <DropdownMenuRadioGroup value={modelPreference} onValueChange={handleModelChange}>
-                      {MODEL_OPTIONS.map(option => (
-                        <DropdownMenuRadioItem key={option.id} value={option.id}>
-                          <span className="flex flex-col gap-1">
-                            <span className="text-sm font-medium">{option.label}</span>
-                            <span className="text-sm text-muted-foreground font-normal">
-                              {option.description}
-                            </span>
-                          </span>
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                {/* Desktop keeps the model picker here; mobile moves it to the page header. */}
+                <ModelSelector
+                  variant="composer"
+                  className="hidden md:inline-flex"
+                  value={modelPreference}
+                  onValueChange={handleModelChange}
+                />
                 {(newMessage.trim() || pendingAttachments.length > 0) && (
                   <Button
                     onClick={() => handleSendMessage()}
                     disabled={isTyping}
                     size="sm"
-                    className="h-10 w-10 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
+                    className="h-10 w-10 flex-shrink-0 p-0 smooth-transition hover:shadow-glow hover:scale-105 disabled:opacity-50"
                     style={{ background: 'var(--gradient-primary)' }}
                   >
                     <Send className="w-5 h-5" />
@@ -1927,7 +1986,7 @@ const Chat = () => {
           )}
           </div>
 
-          <div className="mt-2 text-xs text-muted-foreground text-center">
+          <div className="mt-2 hidden px-1 text-center text-xs text-muted-foreground sm:block">
             Enter to send · Shift+Enter for a new line · / focuses input · Ctrl+M voice · Ctrl+Shift+E emoji
           </div>
         </div>
