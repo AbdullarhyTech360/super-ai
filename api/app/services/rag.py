@@ -11,6 +11,8 @@ import os
 from dotenv import load_dotenv
 from sqlalchemy import text
 
+from app.services.ttl_cache import TtlCache
+
 load_dotenv()
 
 EMBEDDING_MODEL = os.environ.get(
@@ -25,7 +27,12 @@ CHUNK_OVERLAP = int(os.environ.get("RAG_CHUNK_OVERLAP", "150"))
 MAX_CHUNKS_PER_FILE = int(os.environ.get("RAG_MAX_CHUNKS_PER_FILE", "60"))
 MAX_RESULTS = int(os.environ.get("RAG_MAX_RESULTS", "6"))
 
+# Retrieval runs in front of the model on every turn, so the same question
+# asked twice within this window only embeds once.
+EMBEDDING_CACHE_SECONDS = float(os.environ.get("RAG_EMBEDDING_CACHE_SECONDS", "120"))
+
 _embed_client = None
+_query_embeddings = TtlCache(EMBEDDING_CACHE_SECONDS)
 
 
 def _client():
@@ -59,6 +66,9 @@ def embed_query(text: str) -> list[float]:
     """Embed a single query for similarity search."""
     if not text.strip():
         return []
+    cached = _query_embeddings.get(text)
+    if cached is not None:
+        return cached
     from google.genai.types import EmbedContentConfig
 
     resp = _client().models.embed_content(
@@ -66,7 +76,10 @@ def embed_query(text: str) -> list[float]:
         contents=[text],
         config=EmbedContentConfig(output_dimensionality=EMBEDDING_DIMENSIONS),
     )
-    return resp.embeddings[0].values
+    embedding = resp.embeddings[0].values
+    if embedding:
+        _query_embeddings.set(text, embedding)
+    return embedding
 
 
 def chunk_text(text: str) -> list[str]:
@@ -223,6 +236,28 @@ def index_attachments(
                 )
     except Exception:
         pass
+
+
+def has_documents(session, user_id: str, conversation_id: str) -> bool:
+    """Whether this conversation has any indexed chunks to ground against.
+
+    A cheap indexed lookup that lets the chat route skip file-grounding — and,
+    crucially, its "Reading your files" stage announcement — on plain chats that
+    never had an upload.
+    """
+    if not is_enabled() or not conversation_id:
+        return False
+    try:
+        with session.bind.connect() as conn:
+            return conn.execute(
+                text(
+                    "SELECT 1 FROM document_chunk "
+                    "WHERE user_id = :user_id AND conversation_id = :conversation_id LIMIT 1"
+                ),
+                {"user_id": user_id, "conversation_id": conversation_id},
+            ).first() is not None
+    except Exception:
+        return False
 
 
 def retrieve_context(

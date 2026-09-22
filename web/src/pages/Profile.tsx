@@ -1,71 +1,77 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { User, Mail, Award, MessageCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Separator } from '@/components/ui/separator';
 import SidebarShell from '@/components/SidebarShell';
 import { useAuth } from '@/hooks/useAuth';
 import { resolveAssetUrl, API_BASE_URL } from '@/lib/api';
 
-interface ProfileUser {
-  id: string;
-  full_name: string;
-  email: string;
-  avatar_url?: string | null;
-}
-
-interface ProfileMessage {
-  id: string;
-  text: string;
-  sender: 'user' | 'ai';
-  created_at: string;
-}
-
 interface ProfileConversation {
   id: string;
   title: string;
   updated_at: string;
-  messages: ProfileMessage[];
+}
+
+interface ProfileStats {
+  conversations: number;
+  user_messages: number;
+  month_user_messages: number;
 }
 
 const Profile = () => {
-  const { authenticatedFetch } = useAuth();
-  const [user, setUser] = useState<ProfileUser | null>(null);
-  const [conversations, setConversations] = useState<ProfileConversation[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const { authenticatedFetch, user, refreshUser } = useAuth();
+  const [stats, setStats] = useState<ProfileStats>({
+    conversations: 0,
+    user_messages: 0,
+    month_user_messages: 0,
+  });
+  const [recentConversations, setRecentConversations] = useState<ProfileConversation[]>([]);
+  const [isLoading, setIsLoading] = useState(() => !user);
   const [loadError, setLoadError] = useState<string | null>(null);
 
-  useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        const headers = {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-        };
-        const [userResponse, conversationsResponse] = await Promise.all([
-          authenticatedFetch(`${API_BASE_URL}/api/me`, { headers }),
-          authenticatedFetch(`${API_BASE_URL}/api/conversations`, { headers }),
-        ]);
+  const loadProfile = useCallback(async () => {
+    setIsLoading(true);
+    setLoadError(null);
+    try {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
+      };
+      // Stats are aggregated server-side and the activity list is capped at
+      // three rows, so this page no longer downloads every message it owns.
+      // The profile itself comes from the shared session, which is already in
+      // flight from the shell — refreshUser() reuses that request.
+      const [statsResponse, recentResponse] = await Promise.all([
+        authenticatedFetch(`${API_BASE_URL}/api/stats`, { headers }),
+        authenticatedFetch(`${API_BASE_URL}/api/conversations?limit=3`, { headers }),
+        refreshUser(),
+      ]);
 
-        if (!userResponse.ok || !conversationsResponse.ok) {
-          throw new Error('Unable to load profile data');
-        }
-
-        const userData = await userResponse.json();
-        const conversationsData = await conversationsResponse.json();
-        setUser(userData);
-        setConversations(conversationsData.conversations ?? []);
-      } catch (error) {
-        console.error('Error loading profile:', error);
-        setLoadError('Unable to load your profile right now.');
-      } finally {
-        setIsLoading(false);
+      if (!statsResponse.ok || !recentResponse.ok) {
+        throw new Error('Unable to load profile data');
       }
-    };
 
-    loadProfile();
-  }, [authenticatedFetch]);
+      const [statsData, recentData] = await Promise.all([
+        statsResponse.json(),
+        recentResponse.json(),
+      ]);
+      setStats(statsData);
+      setRecentConversations(recentData.conversations ?? []);
+    } catch (error) {
+      console.error('Error loading profile:', error);
+      setLoadError('Unable to load your profile right now.');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [authenticatedFetch, refreshUser]);
+
+  useEffect(() => {
+    void loadProfile();
+  }, [loadProfile]);
 
   const displayName = user?.full_name || 'User';
   const initials = displayName
@@ -75,17 +81,6 @@ const Profile = () => {
     .join('')
     .slice(0, 2)
     .toUpperCase();
-  const messages = conversations.flatMap(conversation => conversation.messages ?? []);
-  const userMessages = messages.filter(message => message.sender === 'user');
-  const thisMonthMessages = userMessages.filter(message => {
-    const messageDate = new Date(message.created_at);
-    const now = new Date();
-    return messageDate.getFullYear() === now.getFullYear()
-      && messageDate.getMonth() === now.getMonth();
-  });
-  const recentConversations = [...conversations]
-    .sort((first, second) => new Date(second.updated_at).getTime() - new Date(first.updated_at).getTime())
-    .slice(0, 3);
 
   const formatActivityDate = (date: string) => new Date(date).toLocaleDateString(undefined, {
     month: 'short',
@@ -94,16 +89,29 @@ const Profile = () => {
 
   if (isLoading) {
     return (
-      <SidebarShell title="Profile">
-        <div className="text-center text-muted-foreground py-12">Loading profile...</div>
+      <SidebarShell title="Profile" subtitle="Your profile and activity">
+        <div className="p-4 sm:p-6">
+          <div className="max-w-4xl mx-auto space-y-6" role="status" aria-label="Loading profile">
+            <Skeleton className="h-44 w-full rounded-lg" />
+            <div className="grid gap-6 md:grid-cols-2">
+              <Skeleton className="h-56 w-full rounded-lg" />
+              <Skeleton className="h-56 w-full rounded-lg" />
+            </div>
+          </div>
+        </div>
       </SidebarShell>
     );
   }
 
   if (loadError || !user) {
     return (
-      <SidebarShell title="Profile">
-        <div className="text-center text-muted-foreground py-12">{loadError || 'Profile unavailable.'}</div>
+      <SidebarShell title="Profile" subtitle="Your profile and activity">
+        <div className="flex flex-col items-center gap-3 py-12 text-center">
+          <p className="text-muted-foreground">{loadError || 'Profile unavailable.'}</p>
+          <Button variant="outline" size="sm" onClick={() => void loadProfile()}>
+            Try again
+          </Button>
+        </div>
       </SidebarShell>
     );
   }
@@ -155,14 +163,14 @@ const Profile = () => {
                 <div className="flex min-w-0 items-center justify-between gap-3">
                   <span className="min-w-0 break-words text-muted-foreground">Total Conversations</span>
                   <Badge variant="secondary" className="shrink-0 font-bold">
-                    {conversations.length}
+                    {stats.conversations.toLocaleString()}
                   </Badge>
                 </div>
                 <Separator />
                 <div className="flex min-w-0 items-center justify-between gap-3">
                   <span className="min-w-0 break-words text-muted-foreground">Messages Sent</span>
                   <Badge variant="secondary" className="shrink-0 font-bold">
-                    {userMessages.length.toLocaleString()}
+                    {stats.user_messages.toLocaleString()}
                   </Badge>
                 </div>
                 <Separator />
@@ -172,7 +180,7 @@ const Profile = () => {
                     className="shrink-0 text-primary-foreground font-bold"
                     style={{ background: 'var(--gradient-primary)' }}
                   >
-                    {thisMonthMessages.length.toLocaleString()} messages
+                    {stats.month_user_messages.toLocaleString()} messages
                   </Badge>
                 </div>
               </CardContent>

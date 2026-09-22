@@ -277,7 +277,9 @@ All colors MUST be HSL.
   .markdown-message ul { @apply list-disc pl-5; }
   .markdown-message ol { @apply list-decimal pl-5; }
   .markdown-message li { @apply my-1; }
-  .markdown-message a { @apply text-primary underline underline-offset-2; }
+  .markdown-message a {
+    @apply inline-flex max-w-full items-center gap-0.5 break-all rounded-md bg-primary/10 px-1.5 py-px font-medium text-primary no-underline underline-offset-2 transition-colors hover:bg-primary/20 hover:underline;
+  }
   .markdown-message blockquote { @apply border-l-2 border-primary/50 pl-3 italic text-muted-foreground; }
   .markdown-message table { @apply block max-w-full overflow-x-auto border-collapse; }
   .markdown-message th,

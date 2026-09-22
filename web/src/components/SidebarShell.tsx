@@ -20,7 +20,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { resolveAssetUrl } from '@/lib/api';
-import { API_BASE_URL } from '@/lib/api';
 import AppLogo from './AppLogo';
 import AboutDeveloper from './AboutDeveloper';
 
@@ -64,17 +63,16 @@ const SidebarShell = ({
 }: SidebarShellProps) => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { logout, authenticatedFetch } = useAuth();
+  const { logout, user } = useAuth();
   const { theme, setTheme } = useTheme();
   const [isMobile, setIsMobile] = useState(window.innerWidth < 768);
   const [isSidebarOpen, setIsSidebarOpen] = useState(!isMobile);
   const [aboutDialogOpen, setAboutDialogOpen] = useState(false);
-  const [userInfo, setUserInfo] = useState<{ full_name: string; email: string; avatar_url?: string | null } | null>(null);
 
   const isDark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
   const handleThemeChange = (checked: boolean) => setTheme(checked ? 'dark' : 'light');
 
-  const userInitials = (userInfo?.full_name ?? 'User')
+  const userInitials = (user?.full_name ?? 'User')
     .split(' ')
     .filter(Boolean)
     .map(part => part[0])
@@ -82,7 +80,7 @@ const SidebarShell = ({
     .slice(0, 2)
     .toUpperCase();
 
-  const userAvatarSrc = resolveAssetUrl(userInfo?.avatar_url);
+  const userAvatarSrc = resolveAssetUrl(user?.avatar_url);
 
   const handleLogout = () => {
     logout();
@@ -96,27 +94,6 @@ const SidebarShell = ({
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
   }, []);
-
-  useEffect(() => {
-    const fetchUserInfo = async () => {
-      try {
-        const response = await authenticatedFetch(`${API_BASE_URL}/api/me`, {
-          method: 'GET',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('access_token')}`,
-          },
-        });
-        if (!response.ok) throw new Error('Failed to fetch user info');
-        const data = (await response.json()) as { full_name: string; email: string; avatar_url?: string | null };
-        setUserInfo(data);
-      } catch (error) {
-        console.error('Error fetching user info:', error);
-      }
-    };
-
-    fetchUserInfo();
-  }, [authenticatedFetch]);
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -408,7 +385,7 @@ const SidebarShell = ({
                   aria-label="Account"
                 >
                   <Avatar className="h-8 w-8">
-                    {userAvatarSrc && <AvatarImage src={userAvatarSrc} alt={userInfo?.full_name ?? 'User'} />}
+                    {userAvatarSrc && <AvatarImage src={userAvatarSrc} alt={user?.full_name ?? 'User'} />}
                     <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-xs font-semibold">
                       {userInitials}
                     </AvatarFallback>
@@ -418,14 +395,14 @@ const SidebarShell = ({
               <DropdownMenuContent align="end" className="w-64">
                 <div className="px-2 py-2 flex items-center gap-3">
                   <Avatar className="h-10 w-10">
-                    {userAvatarSrc && <AvatarImage src={userAvatarSrc} alt={userInfo?.full_name ?? 'User'} />}
+                    {userAvatarSrc && <AvatarImage src={userAvatarSrc} alt={user?.full_name ?? 'User'} />}
                     <AvatarFallback style={{ background: 'var(--gradient-primary)' }} className="text-white text-sm font-semibold">
                       {userInitials}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">{userInfo?.full_name || 'User'}</p>
-                    <p className="text-xs text-muted-foreground truncate">{userInfo?.email || '—'}</p>
+                    <p className="text-sm font-medium text-foreground truncate">{user?.full_name || 'User'}</p>
+                    <p className="text-xs text-muted-foreground truncate">{user?.email || '—'}</p>
                   </div>
                 </div>
                 <DropdownMenuSeparator />

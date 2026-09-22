@@ -1,19 +1,23 @@
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from time import perf_counter
 from typing import Annotated
 
 import jwt
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.security import OAuth2PasswordBearer
 from fastapi.staticfiles import StaticFiles
 from jwt.exceptions import InvalidTokenError
 from pwdlib import PasswordHash
+from sqlalchemy import func
 from sqlmodel import Session
+from starlette.background import BackgroundTask
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -32,9 +36,9 @@ from app.schemas.user import (
 )
 from app.services.conversation_ai import (
     MODEL_PROFILES,
+    generate_title,
     resolve_model,
-    send_message_stream,
-    send_message_stream_with_title,
+    stream_message_events,
 )
 from app.services.email import send_verification_email
 from app.services.uploads import (
@@ -48,7 +52,7 @@ from app.services.uploads import (
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "your_secret_key_here")
 ALGORITHM = os.environ.get("ALGORITHM", "HS256")
-ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.environ.get("ACCESS_TOKEN_EXPIRE_MINUTES", "10080"))
 RESET_TOKEN_EXPIRE_MINUTES = int(os.environ.get("RESET_TOKEN_EXPIRE_MINUTES", "30"))
 VERIFY_TOKEN_EXPIRE_MINUTES = int(os.environ.get("VERIFY_TOKEN_EXPIRE_MINUTES", "30"))
 FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
@@ -57,6 +61,27 @@ FRONTEND_BASE_URL = os.environ.get("FRONTEND_BASE_URL", "http://localhost:3000")
 # an unbounded transcript makes each answer slower than the last.
 HISTORY_MAX_MESSAGES = int(os.environ.get("CHAT_HISTORY_MAX_MESSAGES", "20"))
 HISTORY_MAX_CHARS = int(os.environ.get("CHAT_HISTORY_MAX_CHARS", "12000"))
+
+# The title is generated beside the answer, so this only bounds how long the
+# stream waits for it after the answer is complete.
+TITLE_WAIT_SECONDS = float(os.environ.get("CHAT_TITLE_WAIT_SECONDS", "10"))
+
+# What the turn is doing, in words the user can read. Every stage name the
+# stream reports has to appear here, or the label falls back to the raw key.
+CHAT_STAGES = {
+    "searching": "Searching the web",
+    "reading_files": "Reading your files",
+    "gathering": "Gathering context",
+    "thinking": "Thinking",
+    "answering": "Answering",
+}
+
+# Chat opens with a page of conversation headers instead of the whole history,
+# so opening the page stays fast no matter how long the account has existed.
+CONVERSATIONS_PAGE_SIZE = int(os.environ.get("CHAT_LIST_PAGE_SIZE", "50"))
+CONVERSATIONS_PAGE_MAX = int(os.environ.get("CHAT_LIST_PAGE_MAX", "200"))
+MESSAGE_PAGE_SIZE = int(os.environ.get("CHAT_MESSAGE_PAGE_SIZE", "200"))
+MESSAGE_PAGE_MAX = int(os.environ.get("CHAT_MESSAGE_PAGE_MAX", "1000"))
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/user")
 
@@ -78,6 +103,11 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    # Cache the CORS preflight for a day. The chat POST carries an Authorization
+    # header, so it is not a "simple" request and the browser sends an OPTIONS
+    # probe first; without this every message pays an extra round-trip before the
+    # real request is even issued.
+    max_age=86400,
 )
 app.mount("/uploads", StaticFiles(directory=UPLOADS_DIR), name="uploads")
 sessionDep = Annotated[Session, Depends(get_session)]
@@ -591,8 +621,13 @@ def chat_with_ai(
     history: Annotated[str, Form()] = "",
     files: Annotated[list[UploadFile], File()] = [],
     model: Annotated[str, Form()] = "auto",
+    show_thinking: Annotated[bool, Form()] = False,
 ):
     from app.models.chat import Attachment, Conversation, Message
+
+    # Marks the top of the request so the stream can report what each stage of
+    # answering actually cost.
+    request_started = perf_counter()
 
     input_text = " ".join(input.split())[:8000].strip()
     saved_attachments = [save_upload(current_user.id, upload) for upload in files]
@@ -725,57 +760,77 @@ def chat_with_ai(
                 )
 
     # Ground the current turn: web search for factual/current questions, RAG
-    # over previously uploaded files in this conversation. Resolved lazily
-    # inside the stream generator (see below) so the response opens first.
+    # over previously uploaded files in this conversation.
     rag_conversation_id = (
         conversation.id
-        if rag.is_enabled() and conversation is not None
+        if rag.is_enabled()
+        and conversation is not None
+        and rag.has_documents(session, current_user.id, conversation.id)
+        else None
+    )
+
+    # The three side tasks of a turn share one pool and are all started here,
+    # before the response is even opened: they are independent network
+    # round-trips, and queueing them serially added their latencies together.
+    # Only grounding is awaited before the model call — the title is a
+    # decoration and must never delay the first answer token.
+    pipeline = ThreadPoolExecutor(max_workers=3)
+
+    title_future = (
+        pipeline.submit(generate_title, input_text, history_list)
+        if persist and conversation is not None and (is_new or conversation_id is None)
+        else None
+    )
+    search_future = (
+        pipeline.submit(search_web, input_text[:300])
+        if should_search(input_text)
+        else None
+    )
+    rag_future = (
+        pipeline.submit(
+            rag.retrieve_context,
+            session,
+            current_user.id,
+            rag_conversation_id,
+            input_text,
+        )
+        if rag_conversation_id is not None
         else None
     )
 
     def gather_grounding() -> tuple[list[dict] | None, str]:
-        """Fetch web and file grounding concurrently.
-
-        Both lookups are independent network round-trips, so running them
-        together costs one wait instead of two added to every answer.
-        """
-        from concurrent.futures import ThreadPoolExecutor
-
+        """Collect the web and file context started above."""
         web: list[dict] | None = None
         context = ""
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            search_future = (
-                pool.submit(search_web, input_text[:300])
-                if should_search(input_text)
-                else None
-            )
-            rag_future = (
-                pool.submit(
-                    rag.retrieve_context,
-                    session,
-                    current_user.id,
-                    rag_conversation_id,
-                    input_text,
-                )
-                if rag_conversation_id is not None
-                else None
-            )
-            if search_future is not None:
-                try:
-                    web = search_future.result()
-                except Exception:
-                    web = None
-            if rag_future is not None:
-                try:
-                    context = rag_future.result()
-                except Exception:
-                    context = ""
+        if search_future is not None:
+            try:
+                web = search_future.result()
+            except Exception:
+                web = None
+        if rag_future is not None:
+            try:
+                context = rag_future.result()
+            except Exception:
+                context = ""
         return web, context
 
     def stream_response():
-        import json
-
         fallback_title = input_text[:50]
+        announced_stage: str | None = None
+
+        def emit_stage(name: str) -> str | None:
+            """Report what the turn is doing, once per stage.
+
+            The model announces its own thinking step and we announce it before
+            the call is even issued; repeating the label would only flicker.
+            """
+            nonlocal announced_stage
+            if name == announced_stage:
+                return None
+            announced_stage = name
+            return json.dumps(
+                {"type": "stage", "stage": name, "label": CHAT_STAGES.get(name, name)}
+            ) + "\n"
 
         yield json.dumps(
             {
@@ -784,64 +839,103 @@ def chat_with_ai(
                 "title": fallback_title if is_new or conversation_id is None else None,
                 "attachments": start_attachments,
                 "model": model_label,
+                "show_thinking": show_thinking,
             }
         ) + "\n"
 
+        # Everything before the model was called: uploads, conversation rows,
+        # and the wait for the side tasks to be picked up.
+        setup_ms = (perf_counter() - request_started) * 1000
+
+        if search_future is not None and rag_future is not None:
+            grounding_stage: str | None = "gathering"
+        elif search_future is not None:
+            grounding_stage = "searching"
+        elif rag_future is not None:
+            grounding_stage = "reading_files"
+        else:
+            grounding_stage = None
+
+        if grounding_stage is not None:
+            stage_event = emit_stage(grounding_stage)
+            if stage_event:
+                yield stage_event
+
+        grounding_started = perf_counter()
         web_results, rag_context = gather_grounding()
+        grounding_ms = (perf_counter() - grounding_started) * 1000
+
+        title_sent = False
+
+        def emit_title() -> str | None:
+            """Persist the generated title, at most once, and return it."""
+            nonlocal title_sent
+            if title_future is None or title_sent:
+                return None
+            title_sent = True
+            try:
+                generated = title_future.result(timeout=TITLE_WAIT_SECONDS)
+            except Exception:
+                generated = ""
+            if not generated or conversation is None:
+                return None
+            conversation.title = generated
+            session.add(conversation)
+            session.commit()
+            return generated
 
         response_parts = []
+        first_token_ms = None
+        model_started = perf_counter()
+
+        # The model thinks before it shows anything. Naming that wait up front
+        # keeps the pause honest — but only while the user is asking to see the
+        # reasoning. With thinking off the turn must not announce a "Thinking"
+        # step at all, or disabling the switch would appear to do nothing.
+        if show_thinking:
+            stage_event = emit_stage("thinking")
+            if stage_event:
+                yield stage_event
+
         try:
-            if is_new or conversation_id is None:
-                if persist and conversation is not None:
-                    stream = send_message_stream_with_title(
-                        input_text,
-                        history_list,
-                        ai_parts,
-                        model_preference=model or "auto",
-                        web_results=web_results,
-                        rag_context=rag_context,
-                    )
-                    title = ""
-                    for event_type, value in stream:
-                        if event_type == "title":
-                            title = " ".join(value.split())[:50].strip()
-                            if not title:
-                                title = input_text[:50]
-                            conversation.title = title
-                            session.add(conversation)
-                            session.commit()
-                            yield json.dumps({"type": "title", "title": title}) + "\n"
-                        else:
-                            response_parts.append(value)
-                            yield json.dumps({"type": "chunk", "text": value}) + "\n"
+            # One path for every turn. The title used to ride along in this
+            # stream, which meant the answer could not surface until the model
+            # had thought, written the title markers, and reached the answer.
+            for kind, value in stream_message_events(
+                input_text,
+                history_list,
+                ai_parts,
+                model_preference=model or "auto",
+                web_results=web_results,
+                rag_context=rag_context,
+                show_thinking=show_thinking,
+            ):
+                if kind == "stage":
+                    stage_event = emit_stage(value)
+                    if stage_event:
+                        yield stage_event
+                elif kind == "thinking":
+                    yield json.dumps({"type": "thinking", "text": value}) + "\n"
                 else:
-                    for chunk in send_message_stream(
-                        input_text,
-                        history_list,
-                        ai_parts,
-                        model_preference=model or "auto",
-                        web_results=web_results,
-                        rag_context=rag_context,
-                    ):
-                        response_parts.append(chunk)
-                        yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
-            else:
-                for chunk in send_message_stream(
-                    input_text,
-                    history_list,
-                    ai_parts,
-                    model_preference=model or "auto",
-                    web_results=web_results,
-                    rag_context=rag_context,
-                ):
-                    response_parts.append(chunk)
-                    yield json.dumps({"type": "chunk", "text": chunk}) + "\n"
+                    if first_token_ms is None:
+                        first_token_ms = (perf_counter() - model_started) * 1000
+                    response_parts.append(value)
+                    yield json.dumps({"type": "chunk", "text": value}) + "\n"
+                    if title_future is not None and title_future.done():
+                        title = emit_title()
+                        if title:
+                            yield json.dumps({"type": "title", "title": title}) + "\n"
         except Exception as exc:
             print(f"[chat] stream error: {exc}")
             error_detail = (
                 str(exc) if exc else "An unexpected error occurred"
             )
             yield json.dumps({"type": "error", "detail": error_detail}) + "\n"
+
+        if title_future is not None:
+            title = emit_title()
+            if title:
+                yield json.dumps({"type": "title", "title": title}) + "\n"
 
         response = "".join(response_parts)
 
@@ -884,7 +978,30 @@ def chat_with_ai(
                     conversation.id,
                     paragraph_texts,
                 )
+
+        # Where the wait actually went, on every turn: setup and grounding are
+        # our own overhead, ttfb is the model thinking before its first token.
+        total_ms = (perf_counter() - request_started) * 1000
+        timings = {
+            "type": "timing",
+            "setup_ms": round(setup_ms),
+            "grounding_ms": round(grounding_ms),
+            "model_ttfb_ms": None if first_token_ms is None else round(first_token_ms),
+            "total_ms": round(total_ms),
+        }
+        print(
+            f"[chat] {model_label} | setup {timings['setup_ms']}ms | "
+            f"grounding {timings['grounding_ms']}ms | "
+            f"ttfb {timings['model_ttfb_ms']}ms | total {timings['total_ms']}ms"
+        )
+        yield json.dumps(timings) + "\n"
         yield json.dumps({"type": "done"}) + "\n"
+
+    def close_pipeline():
+        # Runs once the response is finished or abandoned. The side tasks are
+        # either done or no longer wanted by now, so a title call that hung
+        # must not hold the pool (or the response) open.
+        pipeline.shutdown(wait=False)
 
     return StreamingResponse(
         stream_response(),
@@ -895,63 +1012,181 @@ def chat_with_ai(
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
         },
+        background=BackgroundTask(close_pipeline),
     )
 
 
-# A route for fetching conversations for the current user
+# A route for fetching conversations for the current user.
+#
+# This is the first thing the chat page asks for, so it stays cheap: one query
+# for the page of conversations and one grouped query for their message
+# stats, with no message bodies. Transcripts used to be loaded here — one query
+# per conversation plus one per message for attachments — which made this
+# response grow with the age of the account and slowed every visit.
 @app.get("/api/conversations")
 def get_conversations(
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+    limit: Annotated[int, Query(ge=1, le=CONVERSATIONS_PAGE_MAX)] = CONVERSATIONS_PAGE_SIZE,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    from app.models.chat import Conversation, Message
+
+    total = (
+        session.query(func.count(Conversation.id))
+        .filter(Conversation.user_id == current_user.id)
+        .scalar()
+    ) or 0
+
+    conversations = (
+        session.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .order_by(Conversation.updated_at.desc(), Conversation.id.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    conversation_ids = [conversation.id for conversation in conversations]
+
+    stats: dict[str, tuple[int, datetime | None]] = {}
+    if conversation_ids:
+        stats = {
+            row.conversation_id: (row.total, row.first_at)
+            for row in (
+                session.query(
+                    Message.conversation_id,
+                    func.count(Message.id).label("total"),
+                    func.min(Message.created_at).label("first_at"),
+                )
+                .filter(Message.conversation_id.in_(conversation_ids))
+                .group_by(Message.conversation_id)
+                .all()
+            )
+        }
+
+    conversation_data = [
+        {
+            "id": conversation.id,
+            "title": conversation.title,
+            # The UI sorts by "time created", which means the first exchange,
+            # not the row's insert time.
+            "created_at": stats.get(conversation.id, (0, None))[1]
+            or conversation.updated_at,
+            "updated_at": conversation.updated_at,
+            "message_count": stats.get(conversation.id, (0, None))[0],
+        }
+        for conversation in conversations
+    ]
+
+    return {
+        "conversations": conversation_data,
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + len(conversation_data) < total,
+    }
+
+
+# Activity totals for the profile page. Aggregated in the database so the
+# profile no longer has to download every message just to count them.
+@app.get("/api/stats")
+def get_activity_stats(
     current_user: Annotated[User, Depends(get_current_user)],
     session: sessionDep,
 ):
     from app.models.chat import Conversation, Message
 
-    conversations = (
-        session.query(Conversation)
-        .filter(Conversation.user_id == current_user.id)
-        .all()
-    )
-    conversation_data = []
-    for conversation in conversations:
-        messages = (
+    def user_messages(*filters):
+        return (
+            session.query(func.count(Message.id))
+            .join(Conversation, Message.conversation_id == Conversation.id)
+            .filter(Conversation.user_id == current_user.id, *filters)
+            .scalar()
+        ) or 0
+
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+
+    return {
+        "conversations": (
+            session.query(func.count(Conversation.id))
+            .filter(Conversation.user_id == current_user.id)
+            .scalar()
+        ) or 0,
+        "messages": user_messages(),
+        "user_messages": user_messages(Message.sender == "user"),
+        "month_user_messages": user_messages(
+            Message.sender == "user", Message.created_at >= month_start
+        ),
+    }
+
+
+# Messages for a single conversation. The chat page loads these only when a
+# conversation is actually opened, which keeps first paint off the transcript.
+@app.get("/api/conversations/{conversation_id}/messages")
+def get_conversation_messages(
+    conversation_id: str,
+    current_user: Annotated[User, Depends(get_current_user)],
+    session: sessionDep,
+    limit: Annotated[int, Query(ge=1, le=MESSAGE_PAGE_MAX)] = MESSAGE_PAGE_SIZE,
+):
+    from app.models.chat import Attachment, Conversation, Message
+
+    conversation = session.get(Conversation, conversation_id)
+    if conversation is None or conversation.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Newest turns first: if a transcript is longer than the page, the part the
+    # user needs to see (and keep in context) is the tail, not the head.
+    # One extra row is fetched purely so "is there more" is exact.
+    recent_messages = list(
+        reversed(
             session.query(Message)
             .filter(Message.conversation_id == conversation.id)
-            .order_by(Message.created_at)
+            .order_by(Message.created_at.desc(), Message.id.desc())
+            .limit(limit + 1)
             .all()
         )
-        conversation_data.append(
-            {
-                "id": conversation.id,
-                "title": conversation.title,
-                "created_at": (
-                    messages[0].created_at if messages else conversation.updated_at
-                ),
-                "updated_at": conversation.updated_at,
-                "messages": [
-                    {
-                        "id": message.id,
-                        "text": message.text,
-                        "sender": message.sender,
-                        "created_at": message.created_at,
-                        "attachments": [
-                            {
-                                "id": attachment.id,
-                                "filename": attachment.filename,
-                                "mime_type": attachment.mime_type,
-                                "size": attachment.size,
-                                "url": attachment_url(
-                                    current_user.id, attachment.stored_path
-                                ),
-                            }
-                            for attachment in message.attachments
-                        ],
-                    }
-                    for message in messages
-                ],
-            }
-        )
+    )
+    has_more_older = len(recent_messages) > limit
+    if has_more_older:
+        recent_messages = recent_messages[1:]
+    message_ids = [message.id for message in recent_messages]
 
-    return {"conversations": conversation_data}
+    attachments_by_message: dict[str, list[dict]] = {}
+    if message_ids:
+        for attachment in (
+            session.query(Attachment)
+            .filter(Attachment.message_id.in_(message_ids))
+            .order_by(Attachment.created_at)
+            .all()
+        ):
+            attachments_by_message.setdefault(attachment.message_id, []).append(
+                {
+                    "id": attachment.id,
+                    "filename": attachment.filename,
+                    "mime_type": attachment.mime_type,
+                    "size": attachment.size,
+                    "url": attachment_url(current_user.id, attachment.stored_path),
+                }
+            )
+
+    return {
+        "conversation_id": conversation.id,
+        "title": conversation.title,
+        "updated_at": conversation.updated_at,
+        "messages": [
+            {
+                "id": message.id,
+                "text": message.text,
+                "sender": message.sender,
+                "created_at": message.created_at,
+                "attachments": attachments_by_message.get(message.id, []),
+            }
+            for message in recent_messages
+        ],
+        "has_more_older": has_more_older,
+    }
 
 
 @app.delete("/api/conversations/{conversation_id}")

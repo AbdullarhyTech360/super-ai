@@ -3,6 +3,8 @@ import os
 import httpx
 from dotenv import load_dotenv
 
+from app.services.ttl_cache import TtlCache
+
 # Read the API key the same way rag.py does, so search works even when this
 # module is imported before the app has loaded its .env file.
 load_dotenv()
@@ -10,9 +12,13 @@ load_dotenv()
 SERPER_URL = "https://google.serper.dev/search"
 SERPER_API_KEY = os.environ.get("SERPER_API_KEY", "")
 # Search runs before the model call, so its timeout is part of the user's wait.
-SEARCH_TIMEOUT_SECONDS = float(os.environ.get("SEARCH_TIMEOUT_SECONDS", "3.0"))
+SEARCH_TIMEOUT_SECONDS = float(os.environ.get("SEARCH_TIMEOUT_SECONDS", "1.8"))
+# Repeated questions within this window reuse their results instead of paying
+# for the lookup again (retries, edit-and-resend, a reloaded page).
+SEARCH_CACHE_SECONDS = float(os.environ.get("SEARCH_CACHE_SECONDS", "120"))
 
 _client: httpx.Client | None = None
+_search_cache = TtlCache(SEARCH_CACHE_SECONDS)
 
 
 def _http_client() -> httpx.Client:
@@ -62,16 +68,25 @@ FACTUAL_KEYWORDS = [
 
 def should_search(input_text: str) -> bool:
     """Return True when the prompt looks like a factual/current-events question
-    that would benefit from live web grounding."""
+    that would benefit from live web grounding.
+
+    Deliberately narrow: the search is a blocking round-trip in front of the
+    model, so a keyword that fires on ordinary questions charges every chat for
+    a lookup it did not need.
+    """
     text = input_text.lower().strip()
     if len(text) < 8:
         return False
     import re
     # Match question starters as whole words at the start of the text
     question_starters = (
-        r"^(who|what|when|where|why|how)\b"
+        r"^(who|what|when|where|why)\b"
     )
     if re.match(question_starters, text):
+        return True
+    # "how" alone is almost always a request for explanation or instructions,
+    # which the model answers from itself; only its factual compounds count.
+    if re.match(r"^how\s+(much|many|long|far)\b", text):
         return True
     # For remaining keywords, require them as whole words
     # to avoid false positives like "how" in "hello how are you"
@@ -90,10 +105,6 @@ def should_search(input_text: str) -> bool:
         (r"\bwon\b", "won"),
         (r"\bwinner\b", "winner"),
         (r"\bnow\b", "now"),
-        (r"\bdate\b", "date"),
-        (r"\byear\b", "year"),
-        (r"202\d", "202"),
-        (r"203\d", "203"),
     )
     for pattern, _ in phrase_keywords:
         if re.search(pattern, text):
@@ -110,6 +121,11 @@ def search_web(query: str, num_results: int = 5) -> list[dict]:
     """
     if not SERPER_API_KEY:
         return []
+
+    cache_key = (query, num_results)
+    cached = _search_cache.get(cache_key)
+    if cached is not None:
+        return cached
 
     payload = {
         "q": query,
@@ -138,7 +154,12 @@ def search_web(query: str, num_results: int = 5) -> list[dict]:
                 "snippet": item.get("snippet", ""),
             }
         )
-    return results[:num_results]
+    results = results[:num_results]
+    # Empty results usually mean a provider hiccup, and caching that would
+    # blind the next turn to a search that would have worked.
+    if results:
+        _search_cache.set(cache_key, results)
+    return results
 
 
 def format_results(results: list[dict], limit: int = 5) -> str:

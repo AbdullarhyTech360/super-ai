@@ -38,7 +38,7 @@ const ACCEPTED_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gi
 const MAX_IMAGE_SIZE = 25 * 1024 * 1024;
 
 const Settings = () => {
-  const { authenticatedFetch, logout } = useAuth();
+  const { authenticatedFetch, logout, setUser, user } = useAuth();
   const { theme, setTheme } = useTheme();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -107,7 +107,7 @@ const Settings = () => {
     }));
   };
 
-  const updatePreferences = (next: SettingsState): Preferences => ({
+  const updatePreferences = (next: SettingsState): Partial<Preferences> => ({
     notifications: next.notifications,
     soundEnabled: next.soundEnabled,
     language: next.language,
@@ -186,6 +186,8 @@ const Settings = () => {
 
       const result = await response.json();
       setSettings(prev => ({ ...prev, avatarUrl: result.avatar_url }));
+      // The sidebar avatar reads from the shared session user, so patch it here.
+      if (user) setUser({ ...user, avatar_url: result.avatar_url });
       toast({ title: 'Profile picture updated', description: 'Your new profile picture is now active.' });
     } catch (error) {
       console.error('Error uploading avatar:', error);
@@ -223,6 +225,7 @@ const Settings = () => {
       const updated = await response.json();
       savePreferences(updatePreferences(settings));
       setSettings(prev => ({ ...prev, name: updated.full_name }));
+      setUser(updated);
       toast({ title: 'Settings saved', description: 'Your profile and preferences have been saved.' });
     } catch (error) {
       console.error('Error saving settings:', error);

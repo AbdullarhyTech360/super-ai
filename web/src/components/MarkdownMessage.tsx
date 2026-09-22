@@ -8,7 +8,7 @@ import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import 'katex/dist/katex.min.css';
 import 'highlight.js/styles/github-dark.css';
-import { Check, Copy } from 'lucide-react';
+import { Check, Copy, ExternalLink } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { cn } from '@/lib/utils';
@@ -52,6 +52,24 @@ const cleanHeadingText = (node: ReactNode): ReactNode => {
   return node;
 };
 
+/**
+ * Turn a bare URL into a compact, human-readable label (host + a short path)
+ * so citations like https://www.example.com/a/very/long/… render as
+ * "example.com/a/very/long/…" instead of a long blue underlined string.
+ */
+const prettyUrlLabel = (rawHref: string): string => {
+  try {
+    const url = new URL(rawHref);
+    const host = url.hostname.replace(/^www\./, '');
+    const path = url.pathname.replace(/\/$/, '');
+    if (!path || path === '') return host;
+    const trimmed = path.length > 24 ? `${path.slice(0, 22)}…` : path;
+    return `${host}${trimmed}`;
+  } catch {
+    return rawHref;
+  }
+};
+
 const normalizeMarkdownHeadings = (markdown: string) => {
   let insideCodeFence = false;
 
@@ -91,6 +109,26 @@ const MarkdownMessage = ({ content }: MarkdownMessageProps) => {
         <code className={cn(className, 'rounded bg-muted px-1.5 py-0.5 text-[0.9em]')} {...props}>
           {children}
         </code>
+      );
+    },
+    a({ href, children, ...props }) {
+      const rawHref = typeof href === 'string' ? href : '';
+      const linkText = getCodeText(children).trim();
+      // A link whose label is just the URL (auto-linked citations) gets a
+      // compact host+path label; descriptive links keep their own text.
+      const isBareUrl = !!rawHref
+        && (linkText === rawHref.trim() || /^https?:\/\//i.test(linkText));
+      return (
+        <a
+          href={rawHref || undefined}
+          target="_blank"
+          rel="noopener noreferrer nofollow"
+          title={rawHref || undefined}
+          {...props}
+        >
+          {isBareUrl ? prettyUrlLabel(rawHref) : children}
+          <ExternalLink className="ml-0.5 inline h-3 w-3 shrink-0 align-baseline opacity-70" aria-hidden="true" />
+        </a>
       );
     },
     h1({ children, ...props }) {
