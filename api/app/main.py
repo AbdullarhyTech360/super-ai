@@ -41,8 +41,15 @@ from app.services.conversation_ai import (
     stream_message_events,
 )
 from app.services.email import send_password_reset_email, send_verification_email
+from app.services.rate_limit import (
+    chat_limit,
+    email_limit,
+    login_limit,
+    signup_limit,
+)
 from app.services.uploads import (
     IMAGE_TYPES,
+    MAX_FILES_PER_MESSAGE,
     UPLOADS_DIR,
     attachment_url,
     build_ai_parts,
@@ -244,7 +251,11 @@ def _send_verification_link(email: str) -> None:
 
 # Create a route to create a new user
 @app.post("/api/auth/signup")
-def create_user(user_data: SignUp, session: sessionDep):
+def create_user(
+    user_data: SignUp,
+    session: sessionDep,
+    _rate: None = Depends(signup_limit),
+):
     # First check if the user already exists in the database using the provided email
     existing_user = session.query(User).filter(User.email == user_data.email).first()
     if existing_user:
@@ -302,7 +313,11 @@ def verify_email(verify_request: VerifyEmailRequest, session: sessionDep):
 
 
 @app.post("/api/auth/resend-verification")
-def resend_verification(resend_request: ResendVerificationRequest, session: sessionDep):
+def resend_verification(
+    resend_request: ResendVerificationRequest,
+    session: sessionDep,
+    _rate: None = Depends(email_limit),
+):
     user = session.query(User).filter(User.email == resend_request.email).first()
     if user and not user.is_verified:
         _send_verification_link(user.email)
@@ -323,7 +338,11 @@ def get_user(email: str, session: sessionDep):
 
 
 @app.post("/api/auth/login")
-def authenticate_user_route(form_data: Login, session: sessionDep):
+def authenticate_user_route(
+    form_data: Login,
+    session: sessionDep,
+    _rate: None = Depends(login_limit),
+):
     user = authenticate_user(form_data.email, form_data.password, session)
     if not user:
         raise HTTPException(status_code=401, detail="Invalid email or password.")
@@ -349,7 +368,11 @@ def authenticate_user_route(form_data: Login, session: sessionDep):
 
 
 @app.post("/api/auth/forgot-password")
-def forgot_password(forgot_request: ForgotPasswordRequest, session: sessionDep):
+def forgot_password(
+    forgot_request: ForgotPasswordRequest,
+    session: sessionDep,
+    _rate: None = Depends(email_limit),
+):
     user = session.query(User).filter(User.email == forgot_request.email).first()
     if user:
         expires = datetime.now(timezone.utc) + timedelta(
@@ -622,6 +645,7 @@ def chat_with_ai(
     files: Annotated[list[UploadFile], File()] = [],
     model: Annotated[str, Form()] = "auto",
     show_thinking: Annotated[bool, Form()] = False,
+    _rate: None = Depends(chat_limit),
 ):
     from app.models.chat import Attachment, Conversation, Message
 
@@ -630,6 +654,14 @@ def chat_with_ai(
     request_started = perf_counter()
 
     input_text = " ".join(input.split())[:8000].strip()
+    if len(files) > MAX_FILES_PER_MESSAGE:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"A message can carry at most {MAX_FILES_PER_MESSAGE} files. "
+                f"You attached {len(files)}."
+            ),
+        )
     saved_attachments = [save_upload(current_user.id, upload) for upload in files]
 
     if not input_text and saved_attachments:

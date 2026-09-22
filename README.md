@@ -64,7 +64,7 @@ The repository is a monorepo: `web/` (frontend) and `api/` (backend) live side b
 
 ### Files and input
 
-- **Attachments** up to 25 MB per file: images (JPEG, PNG, WebP, GIF, SVG, BMP, HEIC), PDF/Office documents, CSV/JSON, and common source-code formats. Images go to the model as vision input.
+- **Attachments** up to 25 MB each and up to 8 per message: images (JPEG, PNG, WebP, GIF, SVG, BMP, HEIC), PDF/Office documents, CSV/JSON, and common source-code formats. Images go to the model as vision input.
 - **Voice input** via the Web Speech API.
 - **Avatar upload** on the profile page.
 
@@ -76,6 +76,7 @@ The repository is a monorepo: `web/` (frontend) and `api/` (backend) live side b
 - **Privacy-preserving responses**: reset and resend endpoints return the same message whether or not the account exists.
 - **Data export** of all conversations and messages as JSON, and full **account deletion** that removes rows and stored files.
 - **CORS preflight caching** (24 h `max-age`) so authenticated chat posts skip an extra round-trip.
+- **Rate limiting** on the routes that are free to probe or cost money — login, signup, the two email endpoints, and chat — counted per address on a fixed window and answered with `429` plus `Retry-After`.
 
 ### Interface
 
@@ -235,6 +236,10 @@ This starts `pgvector/pgvector:pg16` as `db`, the backend, and the frontend dev 
 | `CHAT_HISTORY_MAX_MESSAGES`, `CHAT_HISTORY_MAX_CHARS` | No | History trimming |
 | `CHAT_LIST_PAGE_SIZE`, `CHAT_MESSAGE_PAGE_SIZE` | No | Pagination sizes |
 | `SEARCH_TIMEOUT_SECONDS`, `SEARCH_CACHE_SECONDS`, `RAG_EMBEDDING_CACHE_SECONDS` | No | Grounding latency caps |
+| `RATE_LIMIT_ENABLED`, `RATE_LIMIT_WINDOW_SECONDS` | No | Master switch and window, default on / `60` seconds |
+| `RATE_LIMIT_LOGIN`, `_SIGNUP`, `_EMAIL`, `_CHAT` | No | Requests per window per address: `10` / `5` / `5` / `20` |
+| `RATE_LIMIT_TRUST_PROXY` | No | Read `X-Forwarded-For`; only safe behind a rewriting proxy |
+| `CHAT_MAX_FILES` | No | Attachments per message, default `8` |
 
 Never commit `api/.env`; it is git-ignored.
 
@@ -311,7 +316,7 @@ For local development, `docker-compose up db` provides a pgvector-enabled Postgr
 cd api
 pdm run black .      # format
 pdm run isort .      # order imports (profile = "black")
-pdm run pytest       # test runner is installed, but there are no test modules yet
+pdm run pytest       # tests/ — currently the rate limiter and the attachment cap
 
 # Frontend
 cd web

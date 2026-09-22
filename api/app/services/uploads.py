@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
 from fastapi import HTTPException, UploadFile
 from app.services.generate_uuid import generate_uuid
@@ -9,6 +10,10 @@ UPLOADS_DIR = Path(__file__).resolve().parents[2] / "data" / "uploads"
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_FILE_SIZE = 25 * 1024 * 1024
+
+# MAX_FILE_SIZE is per file, so without a count ceiling one request could be
+# N * 25 MB. This bounds what a single message may hold.
+MAX_FILES_PER_MESSAGE = int(os.environ.get("CHAT_MAX_FILES", "8"))
 
 IMAGE_TYPES = {
     "image/jpeg": ".jpg",

@@ -54,6 +54,12 @@ Create `api/.env` first (it is git-ignored and is not in the repository, so ther
 | `AUTO_LONG_PROMPT_CHARS` / `AUTO_COMPLEX_MIN_CHARS` | `600` / `200` | Thresholds for `auto` model routing |
 | `SEARCH_TIMEOUT_SECONDS` / `SEARCH_CACHE_SECONDS` | `1.8` / `120` | Search is blocking, so it is capped and cached |
 | `RAG_EMBEDDING_CACHE_SECONDS` | `120` | Query-embedding cache window |
+| `RATE_LIMIT_ENABLED` | `true` | Master switch; set `false` for local runs sharing one loopback address |
+| `RATE_LIMIT_WINDOW_SECONDS` | `60` | Fixed window every counter covers |
+| `RATE_LIMIT_LOGIN` / `_SIGNUP` / `_EMAIL` / `_CHAT` | `10` / `5` / `5` / `20` | Requests per window per address, per bucket |
+| `RATE_LIMIT_TRUST_PROXY` | `true` | Read `X-Forwarded-For`; only safe behind a proxy that rewrites it |
+| `RATE_LIMIT_MAX_TRACKED_KEYS` | `20000` | Bound on the counter table |
+| `CHAT_MAX_FILES` | `8` | Attachments allowed in one message |
 
 ## Project Structure
 
@@ -76,11 +82,13 @@ api/
 │       ├── search_grounding.py # Serper search with pooling, timeout, TTL cache
 │       ├── uploads.py          # Validation, storage, and multimodal part building
 │       ├── email.py            # Resend / SMTP / console delivery
+│       ├── rate_limit.py       # Fixed-window ceilings on the exposed routes
 │       ├── ttl_cache.py        # Small shared time-boxed cache
 │       └── generate_uuid.py
 ├── data/
 │   └── uploads/              # Per-user attachment and avatar storage
-├── pyproject.toml            # Dependencies, black/isort configuration
+├── tests/                    # pytest modules (conftest supplies dummy env)
+├── pyproject.toml            # Dependencies, black/isort/pytest configuration
 ├── pdm.lock
 └── Dockerfile
 ```
@@ -94,6 +102,8 @@ Public: `GET /`, `POST /api/auth/signup`, `POST /api/auth/login`, `POST /api/aut
 Authenticated (`Authorization: Bearer <token>`): `GET /api/get/user`, `GET|PUT|DELETE /api/me`, `POST /api/me/avatar`, `POST /api/change-password`, `GET /api/export`, `GET /api/stats`, `POST /api/chat`, `GET /api/conversations`, `GET /api/conversations/{id}/messages`, `PUT|DELETE /api/conversations/{id}`, `POST /api/conversations/bulk-delete`.
 
 Static: uploaded files are served from `/uploads`, mounted on `UPLOADS_DIR`.
+
+`login`, `signup`, `forgot-password`, `resend-verification`, and `chat` answer `429` with a `Retry-After` header once an address passes its window.
 
 `POST /api/chat` accepts multipart form fields (`input`, `is_new`, `conversation_id`, `persist`, `history`, `model`, `show_thinking`, and repeated `files`) and responds with `application/x-ndjson` lines: `start`, `stage`, `thinking`, `chunk`, `title`, `timing`, `error`, `done`.
 
@@ -111,6 +121,10 @@ Static: uploaded files are served from `/uploads`, mounted on `UPLOADS_DIR`.
 
 **Latency notes.** CORS preflight responses are cached for a day (`max_age=86400`) so the authenticated chat `POST` does not pay an extra round-trip per message, and the stream sets `X-Accel-Buffering: no` to stop reverse proxies from batching tokens.
 
+**Rate limiting.** `services/rate_limit.py` counts requests per client address and per bucket, on a fixed window, and answers over the ceiling with `429` plus a `Retry-After` header. It guards the routes that are either free to probe or cost money: `login`, `signup`, `forgot-password` and `resend-verification` (which share one email bucket so cycling between them cannot multiply deliveries), and `chat`. A message is also capped at `CHAT_MAX_FILES` attachments, because `MAX_FILE_SIZE` is enforced per file rather than per request; the composer mirrors the same limit.
+
+Counters live in process memory, so a single uvicorn worker gets exact numbers and a multi-worker deployment gets one budget per worker. `X-Forwarded-For` is only trusted when `RATE_LIMIT_TRUST_PROXY` is on, which is correct behind Render and wrong on a direct connection, where the header is spoofable.
+
 ## Schema Management
 
 Tables are created on startup by `SQLModel.metadata.create_all()`. `migrate_schema()` in `main.py` handles what `create_all` cannot: it adds `user.is_verified` as nullable and backfills existing accounts as verified so no current user is locked out, then calls `rag.ensure_schema()` for the vector table. All of it is idempotent.
@@ -121,16 +135,19 @@ Tables are created on startup by `SQLModel.metadata.create_all()`. `migrate_sche
 
 Known limitations, so they are not discovered the hard way:
 
-- **No tests.** `pytest` is a dev dependency and `pdm run pytest` is wired up, but no test modules exist.
-- **No rate limiting or request size guard beyond the 25 MB upload cap.**
+- **Thin test coverage.** `tests/` covers the rate limiter and the attachment cap; the chat stream, RAG, auth flows, and every handler that touches the database are still untested.
+- **Limits are per process.** Multiple workers or replicas each get their own budget, and there is no shared store behind them.
+- **No total request-byte ceiling.** `CHAT_MAX_FILES` bounds the count and `MAX_FILE_SIZE` bounds each file, but nothing rejects an oversized body before it is read.
 
 ## Development
 
 ```bash
 pdm run black .    # format (line-length 88)
 pdm run isort .    # order imports (profile = "black")
-pdm run pytest     # no tests yet
+pdm run pytest     # tests/ — see Current Gaps for what is not covered
 ```
+
+`tests/conftest.py` sets a dummy `DATABASE_URL` before anything imports `app.main`, which builds its engine at import time. No test opens a database connection.
 
 ## Docker
 

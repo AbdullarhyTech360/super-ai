@@ -96,6 +96,7 @@ Defined in `src/App.tsx`:
 - **Styling:** Tailwind utilities plus the CSS variables declared in `src/index.css`. Colour choices should work in light, dark, and system modes. Chat surface colours come from `src/lib/chatThemes.ts` (Default, Aurora, Sunset, Ocean, Midnight, Emerald, Blush, Mist).
 - **Design reference:** `Designs/DESIGN_SYSTEM.md` and the mockups in `Designs/images/` describe the intended visual language.
 - **Client state:** server data belongs in TanStack Query; cache keys and persisted identifiers come from `src/lib/preferences.ts`. Reuse those constants instead of inventing string keys.
+- **Upload limits:** the composer enforces the same ceilings the API does — 25 MB per file and 8 files per message — and toasts what it dropped. Keep the two in sync (`MAX_FILES_PER_MESSAGE` here, `CHAT_MAX_FILES` on the server).
 
 ## Environment
 

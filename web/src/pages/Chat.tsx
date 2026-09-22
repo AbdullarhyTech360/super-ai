@@ -238,6 +238,8 @@ const suggestionPrompts = [
 ];
 
 const MAX_FILE_SIZE = 25 * 1024 * 1024;
+// Mirrors CHAT_MAX_FILES on the API, which rejects the message outright past this.
+const MAX_FILES_PER_MESSAGE = 8;
 
 const ACCEPTED_FILE_TYPES = [
   'image/jpeg',
@@ -815,9 +817,26 @@ const Chat = () => {
 
     if (!accepted.length) return;
 
+    const room = MAX_FILES_PER_MESSAGE - pendingAttachments.length;
+    if (room <= 0) {
+      toast({
+        title: 'Too many files',
+        description: `A message can carry at most ${MAX_FILES_PER_MESSAGE} files.`,
+      });
+      return;
+    }
+
+    const fitting = accepted.slice(0, room);
+    if (fitting.length < accepted.length) {
+      toast({
+        title: 'Some files were not added',
+        description: `A message can carry at most ${MAX_FILES_PER_MESSAGE} files, so ${accepted.length - fitting.length} were left out.`,
+      });
+    }
+
     setPendingAttachments(prev => [
       ...prev,
-      ...accepted.map(file => ({
+      ...fitting.map(file => ({
         id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
         file,
         name: file.name,
