@@ -121,9 +121,7 @@ Tables are created on startup by `SQLModel.metadata.create_all()`. `migrate_sche
 
 Known limitations, so they are not discovered the hard way:
 
-- **Password reset is not emailed.** `forgot_password` logs the reset link to the server console; only verification emails go through `services/email.py`.
 - **No tests.** `pytest` is a dev dependency and `pdm run pytest` is wired up, but no test modules exist.
-- **`httpx` is not a declared dependency.** `services/search_grounding.py` imports it and currently resolves it transitively through `google-genai`. Declare it explicitly if that SDK's dependency set changes.
 - **No rate limiting or request size guard beyond the 25 MB upload cap.**
 
 ## Development

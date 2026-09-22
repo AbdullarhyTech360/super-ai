@@ -117,6 +117,24 @@ def verification_email_html(verify_url: str) -> str:
     )
 
 
+def password_reset_email_html(reset_url: str, expiry_minutes: int = 30) -> str:
+    """Build the email that hands out a password reset link."""
+    body = (
+        "<p style='margin:0 0 16px;'>We received a request to reset the password "
+        "for your Super AI account. Use the button below to choose a new one.</p>"
+        "<p style='margin:0;color:#6b7280;font-size:13px;'>"
+        f"This link expires in {expiry_minutes} minutes. If you did not request a "
+        "password reset, you can safely ignore this email &mdash; your current "
+        "password will not change.</p>"
+    )
+    return render_template(
+        title="Reset your password",
+        body=body,
+        button_url=reset_url,
+        button_label="Reset my password",
+    )
+
+
 def _plain_text(html: str) -> str:
     text = re.sub(r"<[^>]+>", "", html)
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -205,3 +223,13 @@ def send_email(to: str, subject: str, html: str) -> None:
 
 def send_verification_email(to: str, verify_url: str) -> None:
     send_email(to, "Confirm your Super AI email", verification_email_html(verify_url))
+
+
+def send_password_reset_email(
+    to: str, reset_url: str, expiry_minutes: int = 30
+) -> None:
+    send_email(
+        to,
+        "Reset your Super AI password",
+        password_reset_email_html(reset_url, expiry_minutes),
+    )

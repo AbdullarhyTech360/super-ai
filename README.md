@@ -286,9 +286,7 @@ Uploads are served back under `/uploads/...`, mounted as static files.
 | `backend` | 8000 | 8000 |
 | `frontend` | 3000 | 5173 |
 
-`db_data` and `uploads_data` are named volumes. Secrets are read from `api/.env` through `env_file`.
-
-> **Known issue:** the frontend service publishes `3000:3000` while its command binds the dev server to `5173`, so the intended `http://localhost:3000` URL does not currently respond. Change the mapping to `"3000:5173"` (or point `VITE_API_BASE_URL`/`CORS_ORIGINS` at whichever port you settle on).
+`db_data` and `uploads_data` are named volumes. Secrets are read from `api/.env` through `env_file`. The frontend is reachable at http://localhost:3000, which the backend's default `CORS_ORIGINS` already allows.
 
 ## Database
 

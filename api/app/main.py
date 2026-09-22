@@ -40,7 +40,7 @@ from app.services.conversation_ai import (
     resolve_model,
     stream_message_events,
 )
-from app.services.email import send_verification_email
+from app.services.email import send_password_reset_email, send_verification_email
 from app.services.uploads import (
     IMAGE_TYPES,
     UPLOADS_DIR,
@@ -365,10 +365,10 @@ def forgot_password(forgot_request: ForgotPasswordRequest, session: sessionDep):
             algorithm=ALGORITHM,
         )
         reset_url = f"{FRONTEND_BASE_URL}/reset-password?token={reset_token}"
-        # TODO: Replace with real email delivery when the email service is
-        # configured during deployment. Until then, the link is logged to the
-        # server console for local development.
-        print(f"[password_reset] Reset link for {user.email}: {reset_url}")
+        try:
+            send_password_reset_email(user.email, reset_url, RESET_TOKEN_EXPIRE_MINUTES)
+        except Exception as exc:  # pragma: no cover - best-effort email delivery
+            print(f"[email] Failed to send password reset email to {user.email}: {exc}")
 
     # Always return the same message to avoid leaking which emails are registered.
     return {
