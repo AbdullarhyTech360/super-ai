@@ -105,6 +105,8 @@ Static: uploaded files are served from `/uploads`, mounted on `UPLOADS_DIR`.
 
 `login`, `signup`, `forgot-password`, `resend-verification`, and `chat` answer `429` with a `Retry-After` header once an address passes its window.
 
+Uploads are bounded on both axes: `MAX_FILE_SIZE` (25 MB) is enforced while streaming each file to disk, and `CHAT_MAX_FILES` (8) rejects a message outright before anything is written, so one request cannot exceed roughly 200 MB. Over-limit files get `413` and are deleted, never left half-written.
+
 `POST /api/chat` accepts multipart form fields (`input`, `is_new`, `conversation_id`, `persist`, `history`, `model`, `show_thinking`, and repeated `files`) and responds with `application/x-ndjson` lines: `start`, `stage`, `thinking`, `chunk`, `title`, `timing`, `error`, `done`.
 
 ## How It Works
@@ -133,11 +135,11 @@ Tables are created on startup by `SQLModel.metadata.create_all()`. `migrate_sche
 
 ## Current Gaps
 
-Known limitations, so they are not discovered the hard way:
+Only one gap is worth calling out, and it is the kind that closes itself as features change:
 
-- **Thin test coverage.** `tests/` covers the rate limiter and the attachment cap; the chat stream, RAG, auth flows, and every handler that touches the database are still untested.
-- **Limits are per process.** Multiple workers or replicas each get their own budget, and there is no shared store behind them.
-- **No total request-byte ceiling.** `CHAT_MAX_FILES` bounds the count and `MAX_FILE_SIZE` bounds each file, but nothing rejects an oversized body before it is read.
+- **Test coverage is narrow.** `tests/` holds the rate limiter and the attachment cap; the chat stream, RAG, auth flows, and anything touching the database are untested, and those handlers need a database fixture before they can be.
+
+Deployment-shaped limits are documented where they belong instead — counters live in one process (see Rate limiting) and the schema has no migration tool (see Schema Management).
 
 ## Development
 
