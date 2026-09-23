@@ -6,13 +6,20 @@ Gemini and Serper APIs. Limits are counted per client address and per route, so
 one busy user cannot exhaust another's allowance.
 
 Counting lives in this process only: a single uvicorn worker gets exact
-numbers, and a multi-worker deployment gets one budget per worker. Raise the
-limits or move the counters to a shared store if the deployment ever fans out.
+numbers, and a multi-worker deployment gets one budget per worker (which
+multiplies every allowance). Raise the limits or move the counters to a shared
+store if the deployment ever fans out.
+
+Auth routes use a fixed window: a cheap, hard ceiling that is fine to reset all
+at once. Chat uses a sliding window instead, because a person who exhausts a
+fixed budget then stares at a dead endpoint until it rolls over — the pause is
+exactly what a rate limit is meant to avoid, and it reads as the app hanging.
 """
 
 import os
 import threading
 import time
+from collections import deque
 from collections.abc import Callable
 
 from fastapi import Depends, HTTPException, Request
@@ -52,6 +59,8 @@ LIMITS = {
 
 # key -> (count, window deadline on the monotonic clock)
 _counters: dict[str, tuple[int, float]] = {}
+# key -> request timestamps within the sliding window, oldest first
+_sliding: dict[str, deque[float]] = {}
 _lock = threading.Lock()
 
 
@@ -84,6 +93,48 @@ def _prune(now: float) -> None:
             del _counters[stale_key]
 
 
+def _hit_sliding(key: str, limit: int) -> tuple[bool, int]:
+    """Record one request in a sliding window; return (allowed, retry_after).
+
+    Keeps the timestamps of recent requests rather than a single counter, so
+    allowance is reclaimed continuously as the oldest entries age out instead of
+    all at once when a fixed window rolls over.
+    """
+    now = time.monotonic()
+    cutoff = now - WINDOW_SECONDS
+    with _lock:
+        stamps = _sliding.get(key)
+        if stamps is None:
+            stamps = deque()
+            _sliding[key] = stamps
+        while stamps and stamps[0] <= cutoff:
+            stamps.popleft()
+
+        if len(stamps) >= limit:
+            # The caller frees a slot as soon as the oldest in-window request
+            # falls out of the window.
+            return False, max(1, round(stamps[0] + WINDOW_SECONDS - now))
+
+        stamps.append(now)
+        if len(_sliding) > MAX_TRACKED_KEYS:
+            _prune_sliding(now)
+        return True, 0
+
+
+def _prune_sliding(now: float) -> None:
+    """Drop sliding keys whose every timestamp has aged out. Holds the lock."""
+    cutoff = now - WINDOW_SECONDS
+    for stale_key in [k for k, s in _sliding.items() if not s or s[-1] <= cutoff]:
+        del _sliding[stale_key]
+    # Still full: keep the keys with the soonest next expiry.
+    overflow = len(_sliding) - MAX_TRACKED_KEYS
+    if overflow > 0:
+        for stale_key in sorted(
+            _sliding, key=lambda k: _sliding[k][-1] + WINDOW_SECONDS if _sliding[k] else 0
+        )[:overflow]:
+            del _sliding[stale_key]
+
+
 def client_ip(request: Request) -> str:
     """The address to rate limit, honouring the proxy chain when configured."""
     if TRUST_PROXY_HEADERS:
@@ -96,14 +147,19 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def limiter(scope: str, limit: int) -> Callable[..., None]:
-    """Build a route dependency that caps one endpoint for one address."""
+def limiter(scope: str, limit: int, *, sliding: bool = False) -> Callable[..., None]:
+    """Build a route dependency that caps one endpoint for one address.
+
+    `sliding` chooses the sliding-window counter (chat, recovers gradually) over
+    the fixed-window one (auth, a hard ceiling).
+    """
+    hit = _hit_sliding if sliding else _hit
 
     def enforce(request: Request) -> None:
         if not RATE_LIMIT_ENABLED:
             return
         key = f"{scope}:{client_ip(request)}"
-        allowed, retry_after = _hit(key, limit)
+        allowed, retry_after = hit(key, limit)
         if not allowed:
             raise HTTPException(
                 status_code=429,
@@ -120,4 +176,4 @@ def limiter(scope: str, limit: int) -> Callable[..., None]:
 login_limit = limiter("login", LIMITS["login"])
 signup_limit = limiter("signup", LIMITS["signup"])
 email_limit = limiter("email", LIMITS["email"])
-chat_limit = limiter("chat", LIMITS["chat"])
+chat_limit = limiter("chat", LIMITS["chat"], sliding=True)

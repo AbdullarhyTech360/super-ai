@@ -675,16 +675,18 @@ def chat_with_ai(
             upload.file.close()
         raise HTTPException(status_code=400, detail="Message cannot be empty.")
 
-    if is_new or conversation_id is None:
+    # Whether this turn creates the conversation row. A brand-new conversation
+    # has no messages and no indexed chunks, so the queries that would read them
+    # are pointless round-trips — and on a high-latiness database each one costs
+    # over a second. The row itself is not inserted here either: its id is
+    # generated client-side, so the INSERT is deferred to the background task.
+    conversation_is_new = bool(is_new or conversation_id is None)
+    if conversation_is_new:
         if persist:
-            new_conversation = Conversation(
+            conversation = Conversation(
                 user_id=current_user.id,
                 title=input_text[:50],
             )
-            session.add(new_conversation)
-            session.commit()
-            session.refresh(new_conversation)
-            conversation = new_conversation
         else:
             conversation = None
     else:
@@ -700,9 +702,10 @@ def chat_with_ai(
             raise HTTPException(status_code=404, detail="Conversation not found")
 
     history_list: list[tuple[str, str]] = []
-    if conversation is not None:
+    if conversation is not None and not conversation_is_new:
         # Only the newest turns are loaded: the whole transcript is never
-        # needed, and fetching it made long chats slower to answer.
+        # needed, and fetching it made long chats slower to answer. A new
+        # conversation has no stored turns, so this query is skipped entirely.
         recent_messages = (
             session.query(Message)
             .filter(Message.conversation_id == conversation.id)
@@ -745,8 +748,9 @@ def chat_with_ai(
             "filename": filename,
             "mime_type": mime_type,
             "size": size,
+            "data": data,
         }
-        for attachment_id, generated_name, filename, mime_type, size in saved_attachments
+        for attachment_id, generated_name, filename, mime_type, size, data in saved_attachments
     ]
     ai_parts = build_ai_parts(attachment_meta, current_user.id)
     start_attachments = [
@@ -775,11 +779,13 @@ def chat_with_ai(
         for meta in attachment_meta:
             if not is_text_like(meta["mime_type"]):
                 continue
-            path = UPLOADS_DIR / current_user.id / meta["generated_name"]
-            if not path.exists():
+            # Reuse the bytes already read at upload time rather than opening
+            # the stored file again; this is the third consumer of the same data.
+            data = meta.get("data")
+            if not data:
                 continue
             try:
-                content = path.read_text(encoding="utf-8")
+                content = data.decode("utf-8")
             except UnicodeDecodeError:
                 content = None
             if content and content.strip():
@@ -792,11 +798,15 @@ def chat_with_ai(
                 )
 
     # Ground the current turn: web search for factual/current questions, RAG
-    # over previously uploaded files in this conversation.
+    # over previously uploaded files in this conversation. A new conversation
+    # cannot have indexed chunks yet (its uploads are inlined directly and only
+    # indexed after the turn), so retrieval — and its existence query — are
+    # skipped, saving a database round-trip on the first message.
     rag_conversation_id = (
         conversation.id
         if rag.is_enabled()
         and conversation is not None
+        and not conversation_is_new
         and rag.has_documents(session, current_user.id, conversation.id)
         else None
     )
@@ -807,6 +817,11 @@ def chat_with_ai(
     # Only grounding is awaited before the model call — the title is a
     # decoration and must never delay the first answer token.
     pipeline = ThreadPoolExecutor(max_workers=3)
+
+    # The generator fills this with the finished answer text; the background
+    # task reads it to persist the turn after the stream has closed. Sharing it
+    # through a holder keeps the multi-second write off the user's critical path.
+    stream_state: dict[str, str] = {"response": ""}
 
     title_future = (
         pipeline.submit(generate_title, input_text, history_list)
@@ -900,7 +915,12 @@ def chat_with_ai(
         title_sent = False
 
         def emit_title() -> str | None:
-            """Persist the generated title, at most once, and return it."""
+            """Resolve the generated title once and return it for the stream.
+
+            It is applied to the in-memory conversation and written by the
+            background task; committing it here would put a database round-trip
+            on the answer's critical path for something that is only a label.
+            """
             nonlocal title_sent
             if title_future is None or title_sent:
                 return None
@@ -912,8 +932,6 @@ def chat_with_ai(
             if not generated or conversation is None:
                 return None
             conversation.title = generated
-            session.add(conversation)
-            session.commit()
             return generated
 
         response_parts = []
@@ -970,46 +988,11 @@ def chat_with_ai(
                 yield json.dumps({"type": "title", "title": title}) + "\n"
 
         response = "".join(response_parts)
-
-        if persist and conversation is not None:
-            user_message = Message(
-                conversation_id=conversation.id,
-                text=input_text,
-                sender="user",
-            )
-            session.add(user_message)
-            session.commit()
-            session.refresh(user_message)
-
-            for meta in attachment_meta:
-                session.add(
-                    Attachment(
-                        message_id=user_message.id,
-                        filename=meta["filename"],
-                        mime_type=meta["mime_type"],
-                        size=meta["size"],
-                        stored_path=meta["generated_name"],
-                    )
-                )
-
-            session.add_all(
-                [
-                    Message(
-                        conversation_id=conversation.id, text=response, sender="ai"
-                    ),
-                ]
-            )
-            conversation.updated_at = datetime.now(timezone.utc)
-            session.add(conversation)
-            session.commit()
-
-            if paragraph_texts:
-                rag.index_attachments(
-                    session,
-                    current_user.id,
-                    conversation.id,
-                    paragraph_texts,
-                )
+        # Hand the finished text to the background task, which persists the
+        # turn and indexes any uploads. Doing it here instead would keep the
+        # client waiting on database writes and Gemini embedding calls after the
+        # last token, long past the point the answer is on screen.
+        stream_state["response"] = response
 
         # Where the wait actually went, on every turn: setup and grounding are
         # our own overhead, ttfb is the model thinking before its first token.
@@ -1029,11 +1012,78 @@ def chat_with_ai(
         yield json.dumps(timings) + "\n"
         yield json.dumps({"type": "done"}) + "\n"
 
+    def finalize_turn():
+        """Persist the turn and index its uploads after the stream has closed.
+
+        Runs as a background task on a fresh session: the request-scoped one is
+        torn down by FastAPI before background tasks fire, and reusing it would
+        write through a closed connection. A brand-new conversation row is
+        inserted here too — its id was generated client-side, so the answer never
+        waited on that INSERT. Everything is one transaction on one connection.
+        Best-effort: a failure is logged and never reaches the finished response.
+        """
+        if not persist or conversation is None:
+            return
+        response = stream_state["response"]
+        try:
+            with Session(engine) as bg_session:
+                if conversation_is_new:
+                    managed = conversation
+                    bg_session.add(managed)
+                else:
+                    managed = bg_session.get(Conversation, conversation.id)
+                    if managed is None:
+                        return
+
+                user_message = Message(
+                    conversation_id=managed.id,
+                    text=input_text,
+                    sender="user",
+                )
+                bg_session.add(user_message)
+                # Flush so the user row exists before its attachments reference it.
+                bg_session.flush()
+
+                for meta in attachment_meta:
+                    bg_session.add(
+                        Attachment(
+                            message_id=user_message.id,
+                            filename=meta["filename"],
+                            mime_type=meta["mime_type"],
+                            size=meta["size"],
+                            stored_path=meta["generated_name"],
+                        )
+                    )
+
+                bg_session.add(
+                    Message(
+                        conversation_id=managed.id, text=response, sender="ai"
+                    )
+                )
+                managed.updated_at = datetime.now(timezone.utc)
+                bg_session.commit()
+
+                if paragraph_texts:
+                    rag.index_attachments(
+                        bg_session,
+                        current_user.id,
+                        managed.id,
+                        paragraph_texts,
+                    )
+        except Exception as exc:
+            print(f"[chat] persist/index failed: {exc}")
+
     def close_pipeline():
         # Runs once the response is finished or abandoned. The side tasks are
         # either done or no longer wanted by now, so a title call that hung
         # must not hold the pool (or the response) open.
         pipeline.shutdown(wait=False)
+
+    def finalize_and_close():
+        # Persist the turn first, then release the pool, so the side tasks are
+        # shut down only once nothing still needs their results.
+        finalize_turn()
+        close_pipeline()
 
     return StreamingResponse(
         stream_response(),
@@ -1044,7 +1094,7 @@ def chat_with_ai(
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
         },
-        background=BackgroundTask(close_pipeline),
+        background=BackgroundTask(finalize_and_close),
     )
 
 

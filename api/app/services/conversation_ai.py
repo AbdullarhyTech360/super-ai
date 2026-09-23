@@ -30,20 +30,20 @@ class ModelProfile:
 MODEL_PROFILES: dict[str, ModelProfile] = {
     "lite": ModelProfile(
         key="lite",
-        model=os.environ.get("GEMINI_MODEL_LITE", "gemini-3.5-flash-lite"),
+        model=os.environ.get("GEMINI_MODEL_LITE", "gemini-2.5-flash"),
         thinking_level=os.environ.get("GEMINI_LITE_THINKING", "low"),
         label="Super AI Lite",
     ),
     "balanced": ModelProfile(
         key="balanced",
-        model=os.environ.get("GEMINI_MODEL_BALANCED", "gemini-3.5-flash"),
+        model=os.environ.get("GEMINI_MODEL_BALANCED", "gemini-2.5-flash"),
         thinking_level=os.environ.get("GEMINI_BALANCED_THINKING", "low"),
         label="Super AI Balanced",
     ),
     "pro": ModelProfile(
         key="pro",
-        model=os.environ.get("GEMINI_MODEL_PRO", "gemini-3.6-flash"),
-        thinking_level=os.environ.get("GEMINI_PRO_THINKING", "medium"),
+        model=os.environ.get("GEMINI_MODEL_PRO", "gemini-2.5-flash"),
+        thinking_level=os.environ.get("GEMINI_PRO_THINKING", "high"),
         label="Super AI Pro",
     ),
 }
@@ -74,7 +74,7 @@ COMPLEX_PROMPT_TOKENS = (
 # sized only for the title (e.g. 24) gets consumed by thinking and truncates the
 # reply to an empty string, so it is kept generous. TITLE_MAX_CHARS still trims
 # the final label.
-TITLE_MODEL = os.environ.get("GEMINI_MODEL_TITLE", "gemini-3.5-flash-lite")
+TITLE_MODEL = os.environ.get("GEMINI_MODEL_TITLE", "gemini-2.5-flash")
 TITLE_THINKING_LEVEL = os.environ.get("GEMINI_TITLE_THINKING", "low")
 TITLE_MAX_OUTPUT_TOKENS = int(os.environ.get("TITLE_MAX_OUTPUT_TOKENS", "128"))
 TITLE_MAX_CHARS = int(os.environ.get("TITLE_MAX_CHARS", "50"))

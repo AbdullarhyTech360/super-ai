@@ -19,8 +19,10 @@ from app.services.uploads import MAX_FILES_PER_MESSAGE
 def clean_counters():
     """Counters live in module state, so each test starts from empty."""
     rl._counters.clear()
+    rl._sliding.clear()
     yield
     rl._counters.clear()
+    rl._sliding.clear()
 
 
 class FakeRequest:

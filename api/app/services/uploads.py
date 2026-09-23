@@ -15,6 +15,12 @@ MAX_FILE_SIZE = 25 * 1024 * 1024
 # N * 25 MB. This bounds what a single message may hold.
 MAX_FILES_PER_MESSAGE = int(os.environ.get("CHAT_MAX_FILES", "8"))
 
+# Cap on how much of a text attachment is inlined into the prompt. The whole
+# body is still embedded and retrievable through RAG; only the verbatim copy
+# that rides along in every request is bounded, because model time-to-first-token
+# grows with prompt size and an uncapped file can dominate the prefill.
+ATTACHMENT_INLINE_MAX_CHARS = int(os.environ.get("ATTACHMENT_INLINE_MAX_CHARS", "24000"))
+
 IMAGE_TYPES = {
     "image/jpeg": ".jpg",
     "image/png": ".png",
@@ -115,10 +121,14 @@ def is_text_like(mime_type: str) -> bool:
     return mime_type.startswith(TEXT_MIME_PREFIXES) or mime_type in CODE_MIME_TYPES
 
 
-def save_upload(user_id: str, upload: UploadFile) -> tuple[str, str, str, str, int]:
+def save_upload(
+    user_id: str, upload: UploadFile
+) -> tuple[str, str, str, str, int, bytes]:
     """Validate and persist an uploaded file.
 
-    Returns (attachment_id, generated_path, filename, mime_type, size).
+    Returns (attachment_id, generated_path, filename, mime_type, size, data).
+    The bytes are handed back so the caller can build the model request (and
+    index text for RAG) without reading the file off disk a second time.
     """
     mime_type = (upload.content_type or "").lower()
     filename = upload.filename or ""
@@ -139,6 +149,7 @@ def save_upload(user_id: str, upload: UploadFile) -> tuple[str, str, str, str, i
     target = user_upload_dir / generated_name
 
     size = 0
+    buffer = bytearray()
     with target.open("wb") as out:
         while chunk := upload.file.read(1024 * 1024):
             size += len(chunk)
@@ -150,10 +161,11 @@ def save_upload(user_id: str, upload: UploadFile) -> tuple[str, str, str, str, i
                     detail="File is too large. Maximum allowed size is 25 MB.",
                 )
             out.write(chunk)
+            buffer.extend(chunk)
 
     if not filename:
         filename = generated_name
-    return attachment_id, generated_name, filename, mime_type, size
+    return attachment_id, generated_name, filename, mime_type, size, bytes(buffer)
 
 
 def save_image_upload(
@@ -204,25 +216,36 @@ def attachment_url(user_id: str, generated_name: str) -> str:
 
 
 def build_ai_parts(attachments: list[dict], user_id: str) -> list[dict]:
-    """Load stored attachment bytes and build Gemini inline data parts.
+    """Turn stored attachments into Gemini inline data parts.
 
-    Each attachment dict has keys: id, generated_name, filename, mime_type.
+    Each attachment dict has keys: id, generated_name, filename, mime_type, and
+    optionally `data` (the bytes already read at upload time). When `data` is
+    present the file is not re-read from disk; otherwise it is loaded from its
+    stored path, and attachments whose file is missing are skipped.
     """
     parts: list[dict] = []
     for attachment in attachments:
-        generated_name = attachment["generated_name"]
         mime_type = attachment["mime_type"]
         filename = attachment["filename"]
-        path = UPLOADS_DIR / user_id / generated_name
-        if not path.exists():
-            continue
+
+        data = attachment.get("data")
+        if data is None:
+            path = UPLOADS_DIR / user_id / attachment["generated_name"]
+            if not path.exists():
+                continue
+            data = path.read_bytes()
 
         if is_text_like(mime_type):
             try:
-                content = path.read_text(encoding="utf-8")
+                content = data.decode("utf-8")
             except UnicodeDecodeError:
                 content = None
             if content is not None and content.strip():
+                if len(content) > ATTACHMENT_INLINE_MAX_CHARS:
+                    content = (
+                        content[:ATTACHMENT_INLINE_MAX_CHARS]
+                        + "\n…[truncated for context; full text is indexed for retrieval]"
+                    )
                 parts.append(
                     {
                         "type": "text",
@@ -234,10 +257,10 @@ def build_ai_parts(attachments: list[dict], user_id: str) -> list[dict]:
                 )
                 continue
 
-        data = base64.b64encode(path.read_bytes()).decode()
+        encoded = base64.b64encode(data).decode()
         if mime_type in IMAGE_TYPES:
-            parts.append({"type": "image", "data": data, "mime_type": mime_type})
+            parts.append({"type": "image", "data": encoded, "mime_type": mime_type})
         else:
-            parts.append({"type": "document", "data": data, "mime_type": mime_type})
+            parts.append({"type": "document", "data": encoded, "mime_type": mime_type})
 
     return parts
