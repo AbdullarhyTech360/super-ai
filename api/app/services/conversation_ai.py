@@ -83,6 +83,12 @@ COMPLEX_PROMPT_TOKENS = (
 # sized only for the title (e.g. 24) gets consumed by thinking and truncates the
 # reply to an empty string, so it is kept generous. TITLE_MAX_CHARS still trims
 # the final label.
+# Classic (lite-tier) thinking budget. Zero is the speed choice: it measured
+# ~1.3-1.7s to the first token but leaves the model unable to plan, so its
+# answers come out short and shallow. Raising it (e.g. 512) trades roughly a
+# second of ttfb per 256 tokens for noticeably better explanations.
+LITE_THINKING_BUDGET = int(os.environ.get("GEMINI_LITE_THINKING_BUDGET", "0"))
+
 TITLE_MODEL = os.environ.get("GEMINI_MODEL_TITLE", "gemini-2.5-flash")
 TITLE_THINKING_LEVEL = os.environ.get("GEMINI_TITLE_THINKING", "low")
 TITLE_MAX_OUTPUT_TOKENS = int(os.environ.get("TITLE_MAX_OUTPUT_TOKENS", "128"))
@@ -120,7 +126,14 @@ SUPER_AI_INSTRUCTION = (
     "covered by search snippets. Never invent a word, spelling, or derivation to "
     "sound authoritative. Give the term only when you are confident; otherwise "
     "give your best guess with an explicit hedge (\u201cI believe \u2026 but I could be "
-    "wrong\u201d) or say you are not certain.\n"
+    "wrong\u201d) or say you are not certain.\n\n"
+    "Answer length follows the question, not the other way round: keep simple "
+    "questions to a direct, brief answer, but when the user asks you to "
+    "explain, teach, compare, analyse, or walk through something, give a "
+    "complete, properly detailed answer \u2014 structured sections, examples, "
+    "and edge cases where they help \u2014 even if that takes many paragraphs. "
+    "Never compress an answer that needs room just to be concise; \u201cstraight "
+    "to the point\u201d means no preamble, not a short reply.\n"
 )
 
 
@@ -392,7 +405,7 @@ def _stream_classic(
         contents=_classic_contents(prompt, attachment_parts),
         config=GenerateContentConfig(
             system_instruction=SUPER_AI_INSTRUCTION,
-            thinking_config=ThinkingConfig(thinking_budget=0),
+            thinking_config=ThinkingConfig(thinking_budget=LITE_THINKING_BUDGET),
         ),
     )
     answering_announced = False
