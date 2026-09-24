@@ -21,18 +21,27 @@ class ModelProfile:
     model: str
     thinking_level: str  # "low" | "medium" | "high"
     label: str
+    # The interactions API has no way to switch thinking off (its floor is
+    # "low"), but the classic API honours thinkingBudget=0 — measured at ~0.8-1.3s
+    # to the first token versus ~1.9-2.7s for interactions at "low", and it is
+    # the one API where gemini-2.5-flash-lite actually emits text. A classic
+    # profile runs the classic streaming call with thinking off and ignores its
+    # thinking_level.
+    use_classic: bool = False
 
 
 # Reasoning budget per tier. Thinking tokens are generated before the first
 # visible token, so every tier is kept at the lowest level that still answers
-# well: only 'pro' spends anything on it. Whether that reasoning is *described*
-# back to the user is a separate switch (see stream_message_events).
+# well: 'lite' spends nothing on it, only 'pro' pays the high budget.
+# Whether that reasoning is *described* back to the user is a separate switch
+# (see stream_message_events).
 MODEL_PROFILES: dict[str, ModelProfile] = {
     "lite": ModelProfile(
         key="lite",
-        model=os.environ.get("GEMINI_MODEL_LITE", "gemini-2.5-flash"),
+        model=os.environ.get("GEMINI_MODEL_LITE", "gemini-2.5-flash-lite"),
         thinking_level=os.environ.get("GEMINI_LITE_THINKING", "low"),
         label="Super AI Lite",
+        use_classic=True,
     ),
     "balanced": ModelProfile(
         key="balanced",
@@ -124,16 +133,13 @@ def build_input(
     return list(attachment_parts) + [{"type": "text", "text": prompt}]
 
 
-def _prepare_arguments(
+def _compose_prompt(
     input_text: str,
     history: Sequence[tuple[str, str]],
-    attachment_parts: Sequence[dict],
-    profile: ModelProfile,
     web_results: Sequence[dict] | None,
     rag_context: str,
-    show_thinking: bool = False,
-) -> dict:
-    """Compose the shared prompt/context and generation options."""
+) -> str:
+    """Fold history and grounding context into the single text the model reads."""
     grounding_blocks: list[str] = []
     if web_results:
         from app.services.search_grounding import format_results
@@ -161,7 +167,20 @@ def _prepare_arguments(
             f"Conversation history:\n{history_text}\n\n"
             f"Latest user message:\n{input_text}"
         )
-    prompt = prompt + context_text
+    return prompt + context_text
+
+
+def _prepare_arguments(
+    input_text: str,
+    history: Sequence[tuple[str, str]],
+    attachment_parts: Sequence[dict],
+    profile: ModelProfile,
+    web_results: Sequence[dict] | None,
+    rag_context: str,
+    show_thinking: bool = False,
+) -> dict:
+    """Compose the shared prompt/context and generation options."""
+    prompt = _compose_prompt(input_text, history, web_results, rag_context)
 
     from google.genai.interactions import GenerationConfig
 
@@ -247,6 +266,17 @@ def stream_message_events(
     client show the wait being spent rather than endured.
     """
     profile = resolve_model(model_preference, input_text, bool(attachment_parts))
+    if profile.use_classic:
+        yield from _stream_classic(
+            profile,
+            input_text,
+            history,
+            attachment_parts,
+            web_results,
+            rag_context,
+        )
+        return
+
     kwargs = _prepare_arguments(
         input_text,
         history,
@@ -261,6 +291,15 @@ def stream_message_events(
     interaction_stream = client.interactions.create(**kwargs, stream=True)
     for event in interaction_stream:
         event_type = getattr(event, "event_type", None)
+
+        # The interactions API reports some failures (quota, invalid config)
+        # as an in-band stream event instead of raising. Dropping it would end
+        # the turn with an empty answer and no explanation, so it becomes an
+        # exception the chat route already turns into an error event.
+        if event_type == "error":
+            error = getattr(event, "error", None)
+            message = getattr(error, "message", None) or "The model returned an error."
+            raise RuntimeError(message)
 
         # A thought step is how the model signals it has started reasoning. It
         # arrives even when no summary text is published for that reasoning, but
@@ -301,6 +340,70 @@ def _thought_summary_text(content: object) -> str:
         return content
     text = getattr(content, "text", None)
     return text if isinstance(text, str) else ""
+
+
+def _classic_contents(prompt: str, attachment_parts: Sequence[dict]) -> str | list:
+    """Translate interactions-format parts for the classic API.
+
+    The two APIs accept different part shapes, and uploads only reach this
+    path when the user forces the lite tier on an attached message (auto
+    sends attachments to balanced), so the translation is small and explicit.
+    """
+    if not attachment_parts:
+        return prompt
+    import base64
+
+    from google.genai import types
+
+    parts = []
+    for part in attachment_parts:
+        if part.get("type") == "text":
+            parts.append(types.Part.from_text(text=part.get("text", "")))
+        else:
+            parts.append(
+                types.Part.from_bytes(
+                    data=base64.b64decode(part["data"]),
+                    mime_type=part["mime_type"],
+                )
+            )
+    parts.append(types.Part.from_text(text=prompt))
+    return parts
+
+
+def _stream_classic(
+    profile: ModelProfile,
+    input_text: str,
+    history: Sequence[tuple[str, str]],
+    attachment_parts: Sequence[dict],
+    web_results: Sequence[dict] | None,
+    rag_context: str,
+) -> Iterator[tuple[str, str]]:
+    """Stream a turn through the classic API with thinking switched off.
+
+    There is nothing to report before the answer here: with a zero budget the
+    model publishes no reasoning, so the stream opens with 'answering' the
+    moment the first text chunk lands, whatever the thinking switch says.
+    """
+    from google.genai.types import GenerateContentConfig, ThinkingConfig
+
+    prompt = _compose_prompt(input_text, history, web_results, rag_context)
+    stream = client.models.generate_content_stream(
+        model=profile.model,
+        contents=_classic_contents(prompt, attachment_parts),
+        config=GenerateContentConfig(
+            system_instruction=SUPER_AI_INSTRUCTION,
+            thinking_config=ThinkingConfig(thinking_budget=0),
+        ),
+    )
+    answering_announced = False
+    for chunk in stream:
+        text = chunk.text
+        if not text:
+            continue
+        if not answering_announced:
+            answering_announced = True
+            yield "stage", "answering"
+        yield "chunk", text
 
 
 def send_message_stream(

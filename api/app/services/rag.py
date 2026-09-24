@@ -7,6 +7,7 @@ context, so the model answers from the user's actual files instead of
 hallucinating.
 """
 import os
+from time import perf_counter
 
 from dotenv import load_dotenv
 from sqlalchemy import text
@@ -31,8 +32,19 @@ MAX_RESULTS = int(os.environ.get("RAG_MAX_RESULTS", "6"))
 # asked twice within this window only embeds once.
 EMBEDDING_CACHE_SECONDS = float(os.environ.get("RAG_EMBEDDING_CACHE_SECONDS", "120"))
 
+# Whether a conversation has any indexed chunks is asked on every ongoing turn
+# and answers "no" almost always, yet each ask was a full database
+# round-trip. The flag is kept in-process; indexing sets it and chunk deletion
+# drops it, so a long TTL stays honest even for a chat that returns to a
+# conversation hours later. Keys are conversation UUIDs, which are globally
+# unique, so no user scoping is needed.
+HAS_DOCUMENTS_CACHE_SECONDS = float(
+    os.environ.get("RAG_HAS_DOCUMENTS_CACHE_SECONDS", "3600")
+)
+
 _embed_client = None
 _query_embeddings = TtlCache(EMBEDDING_CACHE_SECONDS)
+_has_documents = TtlCache(HAS_DOCUMENTS_CACHE_SECONDS, max_entries=256)
 
 
 def _client():
@@ -42,6 +54,12 @@ def _client():
 
         _embed_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
     return _embed_client
+
+
+def embedding_client():
+    """The SDK client used for embeddings, for callers that want to reuse its
+    connection pool (e.g. the startup warm-up)."""
+    return _client()
 
 
 def is_enabled() -> bool:
@@ -236,6 +254,10 @@ def index_attachments(
                 )
     except Exception:
         pass
+    else:
+        # The conversation now has chunks: refresh the cached flag instead of
+        # invalidating it so the next turn skips the lookup round-trip too.
+        _has_documents.set(conversation_id, True)
 
 
 def has_documents(session, user_id: str, conversation_id: str) -> bool:
@@ -243,13 +265,18 @@ def has_documents(session, user_id: str, conversation_id: str) -> bool:
 
     A cheap indexed lookup that lets the chat route skip file-grounding — and,
     crucially, its "Reading your files" stage announcement — on plain chats that
-    never had an upload.
+    never had an upload. The answer is cached per conversation because it
+    rarely changes and the lookup sat on every turn's critical path.
     """
     if not is_enabled() or not conversation_id:
         return False
+    cached = _has_documents.get(conversation_id)
+    if cached is not None:
+        return cached
+    started = perf_counter()
     try:
         with session.bind.connect() as conn:
-            return conn.execute(
+            found = conn.execute(
                 text(
                     "SELECT 1 FROM document_chunk "
                     "WHERE user_id = :user_id AND conversation_id = :conversation_id LIMIT 1"
@@ -258,6 +285,12 @@ def has_documents(session, user_id: str, conversation_id: str) -> bool:
             ).first() is not None
     except Exception:
         return False
+    print(
+        f"[db] has_documents lookup {round((perf_counter() - started) * 1000)}ms "
+        "(cache miss)"
+    )
+    _has_documents.set(conversation_id, found)
+    return found
 
 
 def retrieve_context(
@@ -273,19 +306,26 @@ def retrieve_context(
 
     # Cheap local check first: skip the embedding API round-trip when this
     # conversation has no indexed chunks (the common case for plain chats).
-    try:
-        with session.bind.connect() as conn:
-            exists = conn.execute(
-                text(
-                    "SELECT 1 FROM document_chunk "
-                    "WHERE user_id = :user_id AND conversation_id = :conversation_id LIMIT 1"
-                ),
-                {"user_id": user_id, "conversation_id": conversation_id},
-            ).first()
-    except Exception:
+    # A cached True from has_documents means the SELECT would only re-learn
+    # what we already know, so it is skipped as well.
+    cached = _has_documents.get(conversation_id)
+    if cached is False:
         return ""
-    if not exists:
-        return ""
+    if cached is not True:
+        try:
+            with session.bind.connect() as conn:
+                exists = conn.execute(
+                    text(
+                        "SELECT 1 FROM document_chunk "
+                        "WHERE user_id = :user_id AND conversation_id = :conversation_id LIMIT 1"
+                    ),
+                    {"user_id": user_id, "conversation_id": conversation_id},
+                ).first()
+        except Exception:
+            return ""
+        if not exists:
+            _has_documents.set(conversation_id, False)
+            return ""
 
     try:
         query_embedding = embed_query(query)
@@ -340,3 +380,5 @@ def delete_conversation_chunks(engine, conversation_ids: list[str]) -> None:
             )
     except Exception:
         pass
+    for conversation_id in conversation_ids:
+        _has_documents.delete(conversation_id)

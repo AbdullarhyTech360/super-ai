@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -56,6 +57,7 @@ from app.services.uploads import (
     save_image_upload,
     save_upload,
 )
+from app.services.ttl_cache import TtlCache
 
 SECRET_KEY = os.environ.get("SECRET_KEY", "your_secret_key_here")
 ALGORITHM = os.environ.get("ALGORITHM", "HS256")
@@ -134,6 +136,38 @@ def authenticate_user(email: str, password: str, session: Session) -> User:
     return user
 
 
+# Auth looked the user row up in the database on every single request, which
+# on a remote database is a full round-trip paid before any endpoint can start.
+# The JWT already names the user, so the row is kept as a read-only snapshot
+# in-process for a short window; endpoints that change the account re-fetch a
+# managed row and drop the entry so the edit is visible immediately.
+USER_CACHE_TTL_SECONDS = float(os.environ.get("USER_CACHE_TTL_SECONDS", "900"))
+_user_cache: dict[str, tuple[float, User]] = {}
+_user_cache_lock = threading.Lock()
+
+
+def _user_cache_get(email: str) -> User | None:
+    entry = _user_cache.get(email)
+    if entry is None:
+        return None
+    fetched_at, user = entry
+    if perf_counter() - fetched_at > USER_CACHE_TTL_SECONDS:
+        with _user_cache_lock:
+            _user_cache.pop(email, None)
+        return None
+    return user
+
+
+def _user_cache_put(email: str, user: User) -> None:
+    with _user_cache_lock:
+        _user_cache[email] = (perf_counter(), user)
+
+
+def _user_cache_invalidate(email: str) -> None:
+    with _user_cache_lock:
+        _user_cache.pop(email, None)
+
+
 def get_current_user(
     token: Annotated[str, Depends(oauth2_scheme)],
     session: Session = Depends(get_session),
@@ -146,10 +180,68 @@ def get_current_user(
     except InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
 
+    cached = _user_cache_get(email)
+    if cached is not None:
+        return cached
+
+    started = perf_counter()
     user = session.query(User).filter(User.email == email).first()
+    print(
+        f"[db] user lookup {round((perf_counter() - started) * 1000)}ms "
+        "(cache miss)"
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+    # Detach the cached copy from this request's session so no later flush in
+    # the request can silently write it back; it is a read-only snapshot.
+    session.expunge(user)
+    _user_cache_put(email, user)
+    return user
+
+
+def _managed_user(session: Session, user_id: str) -> User:
+    """Re-read the user row inside the caller's session.
+
+    get_current_user can hand out a cached snapshot that belongs to no session;
+    an endpoint that mutates or deletes the account needs a live managed
+    instance instead, or the change would never reach the database.
+    """
+    user = session.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+# The ownership check of an ongoing conversation was a database round-trip on
+# every turn's critical path, and its answer never changes while this process
+# runs: conversations are created, renamed and deleted through this same
+# single-worker app, and the delete endpoints drop their entries here. Only
+# the owner id is needed to authorize a turn — the row itself is fetched by
+# the background task, off the user's path.
+CONVERSATION_OWNER_CACHE_SECONDS = float(
+    os.environ.get("CONVERSATION_OWNER_CACHE_SECONDS", "3600")
+)
+_conversation_owner = TtlCache(
+    CONVERSATION_OWNER_CACHE_SECONDS, max_entries=512
+)
+
+
+def _conversation_owner_id(session: Session, conversation_id: str) -> str | None:
+    from app.models.chat import Conversation
+
+    cached = _conversation_owner.get(conversation_id)
+    if cached is not None:
+        return cached
+    started = perf_counter()
+    conversation = session.get(Conversation, conversation_id)
+    print(
+        f"[db] conversation lookup {round((perf_counter() - started) * 1000)}ms "
+        "(cache miss)"
+    )
+    if conversation is None:
+        return None
+    _conversation_owner.set(conversation_id, conversation.user_id)
+    return conversation.user_id
 
 
 def _trim_history(
@@ -185,6 +277,27 @@ def startup_event():
     _log_email_config()
     create_db_and_tables()
     migrate_schema()
+    # The two calls above leave a live database connection in the pool, so the
+    # first request no longer pays a cold Postgres handshake. The Gemini hosts
+    # are the other cold start — DNS + TLS over a slow link cost seconds on the
+    # first model call, which is why the turn right after a reload could show a
+    # ~5s ttfb while later ones sat near 3s. Warm both SDK clients off-thread;
+    # failures are fine, they only give that first request its old cost back.
+    threading.Thread(
+        target=_warm_gemini_connections, name="gemini-warmup", daemon=True
+    ).start()
+
+
+def _warm_gemini_connections() -> None:
+    try:
+        from app.services import rag
+        from app.services.conversation_ai import client
+
+        for sdk_client in (client, rag.embedding_client()):
+            for _ in sdk_client.models.list():
+                break
+    except Exception as exc:  # pragma: no cover - best-effort warm-up
+        print(f"[startup] Gemini connection warm-up failed: {exc}")
 
 
 def migrate_schema():
@@ -453,17 +566,18 @@ def update_current_user_info(
     if not full_name:
         raise HTTPException(status_code=400, detail="Name cannot be empty.")
 
-    current_user.full_name = full_name
-    session.add(current_user)
+    user = _managed_user(session, current_user.id)
+    user.full_name = full_name
+    session.add(user)
     session.commit()
-    session.refresh(current_user)
+    _user_cache_invalidate(current_user.email)
     return {
-        "id": current_user.id,
-        "email": current_user.email,
-        "full_name": current_user.full_name,
+        "id": user.id,
+        "email": user.email,
+        "full_name": user.full_name,
         "avatar_url": (
-            attachment_url(current_user.id, current_user.avatar_path)
-            if current_user.avatar_path
+            attachment_url(user.id, user.avatar_path)
+            if user.avatar_path
             else None
         ),
     }
@@ -478,9 +592,10 @@ def delete_current_user_account(
 
     from app.models.chat import Conversation, Message
 
+    user = _managed_user(session, current_user.id)
     conversations = (
         session.query(Conversation)
-        .filter(Conversation.user_id == current_user.id)
+        .filter(Conversation.user_id == user.id)
         .all()
     )
 
@@ -502,14 +617,17 @@ def delete_current_user_account(
         session.delete(conversation)
     session.flush()
 
-    session.delete(current_user)
+    session.delete(user)
     session.commit()
+    _user_cache_invalidate(current_user.email)
+    for conversation in conversations:
+        _conversation_owner.delete(conversation.id)
 
     # Remove the account's stored files from disk (chat attachments + avatar).
     for stored_path in stored_paths:
-        target = UPLOADS_DIR / current_user.id / stored_path
+        target = UPLOADS_DIR / user.id / stored_path
         target.unlink(missing_ok=True)
-    shutil.rmtree(UPLOADS_DIR / current_user.id, ignore_errors=True)
+    shutil.rmtree(UPLOADS_DIR / user.id, ignore_errors=True)
 
     return {"message": "Your account has been deleted."}
 
@@ -529,14 +647,16 @@ def upload_current_user_avatar(
 
     avatar_path, _, _, _ = save_image_upload(current_user.id, file)
     old_path = current_user.avatar_path
-    current_user.avatar_path = avatar_path
-    session.add(current_user)
+    user = _managed_user(session, current_user.id)
+    user.avatar_path = avatar_path
+    session.add(user)
     session.commit()
+    _user_cache_invalidate(current_user.email)
 
     if old_path:
-        (UPLOADS_DIR / current_user.id / old_path).unlink(missing_ok=True)
+        (UPLOADS_DIR / user.id / old_path).unlink(missing_ok=True)
 
-    return {"avatar_url": attachment_url(current_user.id, avatar_path)}
+    return {"avatar_url": attachment_url(user.id, avatar_path)}
 
 
 @app.post("/api/change-password")
@@ -557,9 +677,11 @@ def change_current_user_password(
             detail="New password must be at least 6 characters long.",
         )
 
-    current_user.hashed_password = password_hash.hash(new_password)
-    session.add(current_user)
+    user = _managed_user(session, current_user.id)
+    user.hashed_password = password_hash.hash(new_password)
+    session.add(user)
     session.commit()
+    _user_cache_invalidate(current_user.email)
     return {"message": "Password updated successfully."}
 
 
@@ -690,47 +812,67 @@ def chat_with_ai(
         else:
             conversation = None
     else:
-        conversation = session.get(Conversation, conversation_id)
-        if conversation is None:
+        # Authorized from the cached owner id: the row itself is not loaded
+        # here anymore, because only the background task needs it.
+        owner_id = _conversation_owner_id(session, conversation_id)
+        conversation = None
+        if owner_id is None:
             if persist:
                 for upload in files:
                     upload.file.close()
                 raise HTTPException(status_code=404, detail="Conversation not found")
-        elif conversation.user_id != current_user.id:
+        elif owner_id != current_user.id:
             for upload in files:
                 upload.file.close()
             raise HTTPException(status_code=404, detail="Conversation not found")
 
-    history_list: list[tuple[str, str]] = []
-    if conversation is not None and not conversation_is_new:
-        # Only the newest turns are loaded: the whole transcript is never
-        # needed, and fetching it made long chats slower to answer. A new
-        # conversation has no stored turns, so this query is skipped entirely.
-        recent_messages = (
-            session.query(Message)
-            .filter(Message.conversation_id == conversation.id)
-            .order_by(Message.created_at.desc())
-            .limit(HISTORY_MAX_MESSAGES)
-            .all()
-        )
-        history_list = _trim_history(
-            [
-                (message.sender, message.text)
-                for message in reversed(recent_messages)
-            ]
-        )
-    elif history.strip():
+    # The client renders the transcript, so it already holds the exact turns a
+    # conversation consists of. Sending them along lets an ongoing turn skip
+    # the history SELECT — a full database round-trip — entirely. Persisted
+    # state never reads from it: both messages of the turn are stored from the
+    # request itself, and the history is only prompt context for the model.
+    client_history: list[tuple[str, str]] | None = None
+    if history.strip():
         try:
             parsed_history = json.loads(history)
-            history_list = _trim_history(
-                [
-                    (item.get("sender", ""), item.get("text", ""))
+            if isinstance(parsed_history, list):
+                parsed_turns = [
+                    (str(item.get("sender", "")), str(item.get("text", "")))
                     for item in parsed_history
                     if isinstance(item, dict)
                 ]
-            )
+                client_history = parsed_turns or None
         except (ValueError, TypeError):
-            history_list = []
+            client_history = None
+
+    history_list: list[tuple[str, str]] = []
+    if not conversation_is_new:
+        if client_history is not None:
+            history_list = _trim_history(client_history)
+        else:
+            # Older clients do not send history: fall back to loading the newest
+            # turns from the database (never the whole transcript, which made
+            # long chats slower to answer).
+            started = perf_counter()
+            recent_messages = (
+                session.query(Message)
+                .filter(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at.desc())
+                .limit(HISTORY_MAX_MESSAGES)
+                .all()
+            )
+            print(
+                f"[db] history fallback {round((perf_counter() - started) * 1000)}ms"
+            )
+            history_list = _trim_history(
+                [
+                    (message.sender, message.text)
+                    for message in reversed(recent_messages)
+                ]
+            )
+    elif client_history is not None:
+        # Temporary chats persist nothing, so the client's copy is the history.
+        history_list = _trim_history(client_history)
 
     if conversation is not None:
         response_conversation_id = conversation.id
@@ -771,7 +913,11 @@ def chat_with_ai(
     model_label = profile.label
 
     # Index text uploads so future turns can be grounded in them (best-effort).
-    rag_enabled = rag.is_enabled() and persist and conversation is not None
+    # An ongoing turn has a stored conversation to index against even though
+    # its row is no longer loaded here.
+    rag_enabled = rag.is_enabled() and persist and (
+        conversation is not None if conversation_is_new else conversation_id is not None
+    )
     paragraph_texts: list[dict] = []
     if rag_enabled:
         from app.services.uploads import is_text_like
@@ -803,11 +949,11 @@ def chat_with_ai(
     # indexed after the turn), so retrieval — and its existence query — are
     # skipped, saving a database round-trip on the first message.
     rag_conversation_id = (
-        conversation.id
+        conversation_id
         if rag.is_enabled()
-        and conversation is not None
         and not conversation_is_new
-        and rag.has_documents(session, current_user.id, conversation.id)
+        and conversation_id
+        and rag.has_documents(session, current_user.id, conversation_id)
         else None
     )
 
@@ -1022,16 +1168,18 @@ def chat_with_ai(
         waited on that INSERT. Everything is one transaction on one connection.
         Best-effort: a failure is logged and never reaches the finished response.
         """
-        if not persist or conversation is None:
+        if not persist:
             return
         response = stream_state["response"]
         try:
             with Session(engine) as bg_session:
                 if conversation_is_new:
+                    if conversation is None:
+                        return
                     managed = conversation
                     bg_session.add(managed)
                 else:
-                    managed = bg_session.get(Conversation, conversation.id)
+                    managed = bg_session.get(Conversation, conversation_id)
                     if managed is None:
                         return
 
@@ -1292,6 +1440,7 @@ def delete_conversation(
 
     session.delete(conversation)
     session.commit()
+    _conversation_owner.delete(conversation_id)
 
     for stored_path in stored_paths:
         target = UPLOADS_DIR / current_user.id / stored_path
@@ -1341,6 +1490,8 @@ def bulk_delete_conversations(
     for conversation in conversations:
         session.delete(conversation)
     session.commit()
+    for conversation_id_found in conversation_ids_found:
+        _conversation_owner.delete(conversation_id_found)
 
     for stored_path in stored_paths:
         target = UPLOADS_DIR / current_user.id / stored_path

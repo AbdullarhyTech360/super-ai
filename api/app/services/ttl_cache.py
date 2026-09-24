@@ -38,3 +38,9 @@ class TtlCache:
                 )
                 del self._entries[oldest_key]
             self._entries[key] = (time.monotonic(), value)
+
+    def delete(self, key: Any) -> None:
+        """Drop an entry so the next read re-queries: used when the cached
+        fact itself changes (a file is indexed, chunks are deleted)."""
+        with self._lock:
+            self._entries.pop(key, None)

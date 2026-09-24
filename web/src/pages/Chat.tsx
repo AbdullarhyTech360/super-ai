@@ -1765,7 +1765,10 @@ const Chat = () => {
         formData.append('input', text);
         formData.append('is_new', String(!activeConversation));
         formData.append('persist', String(!isTemporaryChat));
-        if (isTemporaryChat && sendingHistory.length > 0) {
+        // Always send the visible transcript: an ongoing chat would otherwise
+        // re-query it from the database, a full round-trip before the model is
+        // even called. The server trims it to the same budget it would load.
+        if (sendingHistory.length > 0) {
           formData.append('history', JSON.stringify(sendingHistory));
         }
         if (activeConversation) {

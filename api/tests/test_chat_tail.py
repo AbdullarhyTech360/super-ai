@@ -17,6 +17,7 @@ from fastapi import UploadFile
 
 import app.main as m
 from app.services import rag
+from app.services.ttl_cache import TtlCache
 
 
 def _drain(iterator):
@@ -72,6 +73,7 @@ class FakeRequestSession:
 class StubConversation:
     def __init__(self):
         self.id = "conv-bg"
+        self.user_id = "user-1"
         self.title = ""
         self.updated_at = None
 
@@ -116,8 +118,12 @@ def harness(monkeypatch, tmp_path):
         "indexed": False,
     }
     monkeypatch.setattr("app.services.uploads.UPLOADS_DIR", tmp_path)
+    # Ownership decisions must not leak between tests through the in-process
+    # caches the chat path reads.
+    monkeypatch.setattr(m, "_conversation_owner", TtlCache(3600, max_entries=512))
 
     def fake_stream(*a, **k):
+        sink["history"] = list(a[1])
         yield ("chunk", "Hel")
         yield ("chunk", "lo")
 
@@ -145,6 +151,39 @@ def _send(harness):
         persist=True,
         history="",
         files=[upload],
+        model="lite",
+        show_thinking=False,
+        _rate=None,
+    )
+
+
+class OngoingSession(FakeRequestSession):
+    """Session for an existing conversation; counts transcript queries."""
+
+    def __init__(self):
+        self.message_queries = 0
+        self.gets = 0
+
+    def get(self, model, ident):
+        self.gets += 1
+        return StubConversation()
+
+    def query(self, *a, **k):
+        self.message_queries += 1
+        return _QueryChain()
+
+
+def _send_ongoing(session, history):
+    user = type("U", (), {"id": "user-1"})()
+    return m.chat_with_ai(
+        current_user=user,
+        session=session,
+        input="next question",
+        is_new=False,
+        conversation_id="conv-bg",
+        persist=True,
+        history=history,
+        files=[],
         model="lite",
         show_thinking=False,
         _rate=None,
@@ -179,3 +218,38 @@ def test_background_task_persists_and_indexes_the_turn(harness):
     # The AI message carries the joined answer text captured from the stream.
     texts = [getattr(obj, "text", None) for obj in harness["added"]]
     assert "Hello" in texts
+
+
+def test_client_history_skips_the_transcript_query(harness):
+    # The page already renders the transcript, so an ongoing turn that sends
+    # it costs no database round-trip to fetch the same text back.
+    session = OngoingSession()
+    response = _send_ongoing(
+        session, json.dumps([{"sender": "user", "text": "earlier question"}])
+    )
+    _drain(response.body_iterator)
+
+    assert session.message_queries == 0
+    assert harness["history"] == [("user", "earlier question")]
+
+
+def test_missing_history_falls_back_to_the_database(harness):
+    session = OngoingSession()
+    response = _send_ongoing(session, "not json at all")
+    _drain(response.body_iterator)
+
+    assert session.message_queries == 1
+
+
+def test_second_ongoing_turn_skips_the_ownership_query(harness):
+    # The conversation row is read once and its ownership cached; the next
+    # turn in the same conversation authorizes without a database round-trip.
+    session = OngoingSession()
+    history = json.dumps([{"sender": "user", "text": "earlier question"}])
+
+    _drain(_send_ongoing(session, history).body_iterator)
+    first_gets = session.gets
+    _drain(_send_ongoing(session, history).body_iterator)
+
+    assert first_gets == 1
+    assert session.gets == 1
