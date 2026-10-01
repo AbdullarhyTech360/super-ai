@@ -14,6 +14,14 @@ from email.message import EmailMessage
 
 APP_NAME = "Super AI"
 
+# Same flag as conversation_ai.STRESS_STUB_AI: a stress run must not deliver
+# (or pay for) a transactional email per synthetic signup.
+STRESS_STUB_AI = os.environ.get("STRESS_STUB_AI", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 # Resend blocks requests that don't send a real User-Agent header (403 / error
 # code 1010), so identify this application explicitly.
 USER_AGENT = "Super-AI/1.0 (+https://super-ai.amrahaz.me)"
@@ -212,6 +220,9 @@ def _send_via_console(to: str, subject: str, html: str) -> None:
 
 def send_email(to: str, subject: str, html: str) -> None:
     """Dispatch an email to the configured provider."""
+    if STRESS_STUB_AI:
+        print(f"[email] suppressed by STRESS_STUB_AI: to={to} subject={subject!r}")
+        return
     provider = _config()["provider"]
     if provider == "resend":
         _send_via_resend(to, subject, html)

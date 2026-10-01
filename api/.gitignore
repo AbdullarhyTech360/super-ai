@@ -2,3 +2,6 @@ __pypackages__/
 .venv/
 __pycache__/ 
 data/ 
+stress/results/
+locust.log
+monitoring.log

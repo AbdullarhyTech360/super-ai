@@ -1,4 +1,5 @@
 import os
+import time
 from collections.abc import Sequence
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -10,7 +11,23 @@ load_dotenv()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "your_gemini_api_key_here")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+# One flag stubs the entire paid tier (Gemini, Serper, Resend) so a stress run
+# measures this application's own limits — threadpool, DB pool, rate limiter —
+# instead of the model's latency, while spending nothing. Off by default; the
+# harness (stress/locustfile.py) documents the env matrix.
+STRESS_STUB_AI = os.environ.get("STRESS_STUB_AI", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+STRESS_STUB_TOKENS = int(os.environ.get("STRESS_STUB_TOKENS", "80"))
+STRESS_STUB_TTFB_MS = float(os.environ.get("STRESS_STUB_TTFB_MS", "400"))
+STRESS_STUB_TOKEN_DELAY_MS = float(os.environ.get("STRESS_STUB_TOKEN_DELAY_MS", "10"))
+
+# Every path that touches `client` is short-circuited by the stub below, so
+# under STRESS_STUB_AI the SDK client is never created and a missing
+# GEMINI_API_KEY is fine.
+client = None if STRESS_STUB_AI else genai.Client(api_key=GEMINI_API_KEY)
 
 # Registry of the model tiers exposed to chat. Display names are user facing
 # ("Super AI Lite", ...) while the actual Gemini model + thinking level is
@@ -262,6 +279,26 @@ def send_message(
     )
 
 
+def _stub_stream(input_text: str, show_thinking: bool) -> Iterator[tuple[str, str]]:
+    """Replay the real event contract against a synthetic model.
+
+    Emits the same ('stage' | 'thinking' | 'chunk', text) sequence a turn
+    would produce, with the waits faked, so callers exercise every byte of
+    their own logic — streaming, timing events, persistence — without the
+    provider's latency or cost entering the measurement.
+    """
+    if show_thinking:
+        yield "stage", "thinking"
+        yield "thinking", "Stubbed reasoning for the load harness."
+    time.sleep(STRESS_STUB_TTFB_MS / 1000)
+    yield "stage", "answering"
+    token = f"stub token for: {input_text[:40]}\n"
+    for _ in range(STRESS_STUB_TOKENS):
+        yield "chunk", token
+        if STRESS_STUB_TOKEN_DELAY_MS:
+            time.sleep(STRESS_STUB_TOKEN_DELAY_MS / 1000)
+
+
 def stream_message_events(
     input_text: str,
     history: Sequence[tuple[str, str]] = (),
@@ -278,6 +315,10 @@ def stream_message_events(
     arrive on the same stream the answer text uses. Forwarding them lets the
     client show the wait being spent rather than endured.
     """
+    if STRESS_STUB_AI:
+        yield from _stub_stream(input_text, show_thinking)
+        return
+
     profile = resolve_model(model_preference, input_text, bool(attachment_parts))
     if profile.use_classic:
         yield from _stream_classic(
@@ -454,6 +495,9 @@ def generate_title(
     token on every new conversation. Returns '' when labelling fails so the
     caller can fall back to the prompt itself.
     """
+    if STRESS_STUB_AI:
+        return ""
+
     from google.genai.interactions import GenerationConfig
 
     turns = "\n".join(

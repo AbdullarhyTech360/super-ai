@@ -37,6 +37,7 @@ from app.schemas.user import (
 )
 from app.services.conversation_ai import (
     MODEL_PROFILES,
+    STRESS_STUB_AI,
     generate_title,
     resolve_model,
     stream_message_events,
@@ -270,6 +271,25 @@ def read_root():
     return {"message": "Hello, World!"}
 
 
+# Pool telemetry for the stress harness (api/stress/): correlation between
+# client-side latency knees and server-side resource exhaustion. Unregistered
+# — so it 404s — unless STRESS_DIAG_ENABLED is set, because it is unauthenticated.
+if os.environ.get("STRESS_DIAG_ENABLED", "false").lower() in ("1", "true", "yes"):
+
+    @app.get("/api/internal/pool")
+    def pool_diagnostics():
+        pool = engine.pool
+        return {
+            "pool_status": pool.status(),
+            "pool_size": pool.size(),
+            "pool_checked_out": pool.checkedout(),
+            "pool_overflow": pool.overflow(),
+            "pool_checked_in": pool.checkedin(),
+            "pool_timeout_seconds": pool.timeout(),
+            "live_threads": threading.active_count(),
+        }
+
+
 @app.on_event("startup")
 def startup_event():
     # Perform any startup tasks here, such as initializing resources or connections
@@ -283,9 +303,11 @@ def startup_event():
     # first model call, which is why the turn right after a reload could show a
     # ~5s ttfb while later ones sat near 3s. Warm both SDK clients off-thread;
     # failures are fine, they only give that first request its old cost back.
-    threading.Thread(
-        target=_warm_gemini_connections, name="gemini-warmup", daemon=True
-    ).start()
+    # Under the stress stub there is no provider to warm and no client to use.
+    if not STRESS_STUB_AI:
+        threading.Thread(
+            target=_warm_gemini_connections, name="gemini-warmup", daemon=True
+        ).start()
 
 
 def _warm_gemini_connections() -> None:
@@ -307,8 +329,20 @@ def migrate_schema():
     from app.db.database import engine
     from app.services import rag
 
+    is_sqlite = engine.dialect.name == "sqlite"
+    if is_sqlite and rag.is_enabled():
+        # The SQLite stress/dev database has no pgvector, so file-grounding
+        # cannot run against it — switch it off rather than crash on startup.
+        print("[config] RAG disabled: SQLite target has no pgvector")
+        rag.RAG_ENABLED = False
+
     if rag.is_enabled():
         rag.ensure_schema(engine)
+
+    if is_sqlite:
+        # A fresh SQLite file gets the complete current schema from
+        # create_all, so there is nothing to migrate.
+        return
 
     with engine.begin() as conn:
         # Column is added WITHOUT a default so existing rows become NULL and are

@@ -17,6 +17,14 @@ SEARCH_TIMEOUT_SECONDS = float(os.environ.get("SEARCH_TIMEOUT_SECONDS", "1.8"))
 # for the lookup again (retries, edit-and-resend, a reloaded page).
 SEARCH_CACHE_SECONDS = float(os.environ.get("SEARCH_CACHE_SECONDS", "120"))
 
+# Same flag as conversation_ai.STRESS_STUB_AI: under the stress harness no
+# search is billed and none of its latency enters the measurement.
+STRESS_STUB_AI = os.environ.get("STRESS_STUB_AI", "false").lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
 _client: httpx.Client | None = None
 _search_cache = TtlCache(SEARCH_CACHE_SECONDS)
 
@@ -119,6 +127,18 @@ def search_web(query: str, num_results: int = 5) -> list[dict]:
     API key is configured or when the request fails (callers must degrade
     gracefully).
     """
+    if STRESS_STUB_AI:
+        # A fixed synthetic result: the harness wants the grounding code path
+        # exercised (prompt composition, stage events) without a billed lookup
+        # or its network time skewing the measurement.
+        return [
+            {
+                "title": "Stub search result",
+                "url": "https://example.com/stress-stub",
+                "snippet": "Synthetic grounding snippet produced by the stress harness.",
+            }
+        ]
+
     if not SERPER_API_KEY:
         return []
 
