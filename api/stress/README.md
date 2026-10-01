@@ -14,8 +14,9 @@ application's own cost: uvicorn threads, SQLAlchemy pool, rate limiter,
 Postgres.
 
 Accounts are provisioned once per run (signup -> self-signed verification
-token -> login) and cycled by all simulated users; provisioning rotates
-`X-Forwarded-For` so the signup/login ceilings don't throttle setup.
+token -> login, done in parallel under `STRESS_PROVISION_CONCURRENCY`) and
+cycled by all simulated users; provisioning rotates `X-Forwarded-For` so the
+signup/login ceilings don't throttle setup.
 
 ## Test database (no Docker, no downloads)
 
@@ -47,13 +48,22 @@ start. Delete `data/stress.db` between runs for a clean database. RAG is
 switched off automatically for SQLite (no pgvector).
 
 Optional, only if you happen to already have the `db` container locally:
-point `DATABASE_URL` at Postgres instead for the most faithful DB stages —
-never point a load run at the production Supabase database, its per-query
-round-trip (0.5-5s measured) swamps every number and spends mobile data.
+point `DATABASE_URL` at Postgres instead for the most faithful DB stages.
+
+**Never point `--host` at your normally running dev server (the one backed
+by Supabase).** A run creates `STRESS_PROVISION_USERS` (~40) new accounts in
+whatever database the target server uses, every request pays the remote
+round-trip (0.5-5s measured — which swamps every number and spends mobile
+data), and chat requests burn real Gemini credit unless the server itself
+was started with `STRESS_STUB_AI=true`. If a run did hit Supabase by
+mistake, delete the leftovers through the app itself: log in as each
+`stress-*@stress.test` account and call `DELETE /api/me`, which cascades to
+their conversations and files.
 
 Harness-side knobs: `STRESS_BASE_URL`, `STRESS_PROVISION_USERS` (40),
-`STRESS_REQUEST_TIMEOUT` (120s), `STRESS_RATE_PROBE_IP`. It reads the same
-`api/.env` for `SECRET_KEY`/`ALGORITHM` to mint verification tokens.
+`STRESS_PROVISION_CONCURRENCY` (8), `STRESS_REQUEST_TIMEOUT` (120s),
+`STRESS_RATE_PROBE_IP`. It reads the same `api/.env` for
+`SECRET_KEY`/`ALGORITHM` to mint verification tokens.
 
 ## Stages
 

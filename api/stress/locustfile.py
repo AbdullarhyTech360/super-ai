@@ -20,6 +20,7 @@ import random
 import threading
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
 
 import jwt
@@ -43,6 +44,10 @@ ALGORITHM = os.environ.get("STRESS_ALGORITHM") or os.environ.get(
 PASSWORD = "Str3ss-Passw0rd!"
 # Accounts provisioned once at test start and cycled by every simulated user.
 PROVISION_USERS = int(os.environ.get("STRESS_PROVISION_USERS", "40"))
+# Provisioning runs this many accounts at once. Against a remote database one
+# account takes seconds; serial provisioning would eat the whole test window
+# before any simulated user traffic starts.
+PROVISION_CONCURRENCY = int(os.environ.get("STRESS_PROVISION_CONCURRENCY", "8"))
 REQUEST_TIMEOUT = float(os.environ.get("STRESS_REQUEST_TIMEOUT", "120"))
 # The one fake client address the rate-limit probe does NOT rotate, so the
 # fixed/sliding window logic is exercised against a single bucket.
@@ -125,9 +130,10 @@ def _session() -> requests.Session:
     return session
 
 
-def _provision(session: requests.Session) -> dict:
-    """Create + verify + log in one stress account; returns its identity."""
-    email = f"stress-{uuid.uuid4().hex[:10]}@stress.test"
+def _provision_account(email: str) -> dict:
+    """Create + verify + log in one stress account; returns its identity.
+    Opens its own session so many accounts can provision in parallel."""
+    session = _session()
     headers = {"X-Forwarded-For": _fake_ip()}
     response = session.post(
         f"{BASE_URL}/api/auth/signup",
@@ -153,6 +159,19 @@ def _provision(session: requests.Session) -> dict:
     return {"email": email, "ip": headers["X-Forwarded-For"], "token": response.json()["access_token"]}
 
 
+def _timed_provision(email: str) -> dict | None:
+    """Provision one account and report it as a harness metric; failures are
+    counted but never abort the other accounts."""
+    started = time.perf_counter()
+    try:
+        account = _provision_account(email)
+        _fire("provision/account", (time.perf_counter() - started) * 1000)
+        return account
+    except Exception as exc:
+        _fire("provision/account", (time.perf_counter() - started) * 1000, exception=exc)
+        return None
+
+
 _accounts: list[dict] = []
 _accounts_cycle: itertools.cycle | None = None
 _provision_lock = threading.Lock()
@@ -166,14 +185,17 @@ def _on_test_start(environment, **kwargs):
     global _accounts_cycle
     with _provision_lock:
         if not _accounts:
-            bootstrap = _session()
-            for _ in range(PROVISION_USERS):
-                started = time.perf_counter()
-                try:
-                    _accounts.append(_provision(bootstrap))
-                    _fire("provision/account", (time.perf_counter() - started) * 1000)
-                except Exception as exc:
-                    _fire("provision/account", (time.perf_counter() - started) * 1000, exception=exc)
+            emails = [
+                f"stress-{uuid.uuid4().hex[:10]}@stress.test"
+                for _ in range(PROVISION_USERS)
+            ]
+            # Locust green-patches threading, so this pool runs as greenlets.
+            with ThreadPoolExecutor(max_workers=PROVISION_CONCURRENCY) as pool:
+                results = list(pool.map(_timed_provision, emails))
+            _accounts.extend(r for r in results if r)
+            failed = len(results) - len(_accounts)
+            if failed:
+                print(f"[stress] provisioning: {len(_accounts)} ok, {failed} failed")
             if not _accounts:
                 raise RuntimeError(
                     "Could not provision any stress account - is the server "
